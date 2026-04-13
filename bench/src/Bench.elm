@@ -1,5 +1,6 @@
 module Bench exposing
     ( raw_map5
+    , raw_andThen_5
     , raw_loop_10
     , raw_loop_100
     , raw_loop_1000
@@ -57,7 +58,7 @@ Prefixes:
 
 ## andThen — 5 fields via chained andThen
 
-    elm-bench -f Bench.raw_map5 -f Bench.bd_andThen_5 -f Bench.zw_andThen_5 -f Bench.br_andThen_5 "()"
+    elm-bench -f Bench.raw_andThen_5 -f Bench.bd_andThen_5 -f Bench.zw_andThen_5 -f Bench.br_andThen_5 "()"
 
 
 ## oneOf — first and last alternative
@@ -156,6 +157,30 @@ type alias Record5 =
 raw_map5 : () -> Maybe Record5
 raw_map5 () =
     D.decode (D.map5 Record5 D.unsignedInt8 D.unsignedInt8 D.unsignedInt8 D.unsignedInt8 D.unsignedInt8) data5
+
+
+raw_andThen_5 : () -> Maybe Record5
+raw_andThen_5 () =
+    D.decode
+        (D.unsignedInt8
+            |> D.andThen
+                (\a ->
+                    D.unsignedInt8
+                        |> D.andThen
+                            (\b ->
+                                D.unsignedInt8
+                                    |> D.andThen
+                                        (\c ->
+                                            D.unsignedInt8
+                                                |> D.andThen
+                                                    (\d ->
+                                                        D.map (\e -> Record5 a b c d e) D.unsignedInt8
+                                                    )
+                                        )
+                            )
+                )
+        )
+        data5
 
 
 rawLoopFloat64 : Int -> D.Decoder (List Float)
