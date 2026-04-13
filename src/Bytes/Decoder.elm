@@ -77,7 +77,7 @@ runs on malformed input — exactly when we want to re-decode with error trackin
 @docs string
 
 
-## Bytes
+## Raw Bytes
 
 @docs bytes
 

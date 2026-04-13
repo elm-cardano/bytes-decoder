@@ -1,7 +1,6 @@
 module Tests exposing (suite)
 
 import Bytes exposing (Bytes, Endianness(..))
-import Bytes.Decode as D
 import Bytes.Decoder as BD exposing (Error(..))
 import Bytes.Encode as E
 import Expect
@@ -31,13 +30,6 @@ floatBytes fs =
 empty : Bytes
 empty =
     E.encode (E.sequence [])
-
-
-{-| Check the Bytes width equals expected.
--}
-bytesWidth : Int -> Bytes -> Expect.Expectation
-bytesWidth n b =
-    Expect.equal n (Bytes.width b)
 
 
 
@@ -145,6 +137,7 @@ primitiveTests =
             [ test "decodes a float32" <|
                 \_ ->
                     let
+                        input : Bytes
                         input =
                             E.encode (E.float32 BE 1.5)
                     in
@@ -171,6 +164,7 @@ primitiveTests =
             [ test "decodes ASCII" <|
                 \_ ->
                     let
+                        input : Bytes
                         input =
                             E.encode (E.string "hello")
                     in
@@ -179,9 +173,11 @@ primitiveTests =
             , test "decodes UTF-8" <|
                 \_ ->
                     let
+                        s : String
                         s =
                             "café"
 
+                        input : Bytes
                         input =
                             E.encode (E.string s)
                     in
@@ -254,6 +250,7 @@ mappingTests =
             , test "works with mixed types" <|
                 \_ ->
                     let
+                        input : Bytes
                         input =
                             E.encode
                                 (E.sequence
@@ -310,6 +307,7 @@ chainingTests =
         [ test "chains decoders based on value" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context error String
                     decoder =
                         BD.unsignedInt8
                             |> BD.andThen
@@ -329,6 +327,7 @@ chainingTests =
         , test "tag-based dispatching" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context String ( String, Int )
                     decoder =
                         BD.unsignedInt8
                             |> BD.andThen
@@ -349,6 +348,7 @@ chainingTests =
         , test "fail in andThen reports correct offset" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context String value
                     decoder =
                         BD.unsignedInt8
                             |> BD.andThen (\_ -> BD.fail "nope")
@@ -358,6 +358,7 @@ chainingTests =
         , test "propagates first decoder error" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context error String
                     decoder =
                         BD.unsignedInt8
                             |> BD.andThen (\_ -> BD.succeed "ok")
@@ -367,6 +368,7 @@ chainingTests =
         , test "chained andThen with multiple reads" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context error ( Int, Int )
                     decoder =
                         BD.unsignedInt8
                             |> BD.andThen
@@ -394,6 +396,7 @@ pipelineTests =
             [ test "builds a record" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error { x : Int, y : Int, z : Int }
                         decoder =
                             BD.succeed (\a b c -> { x = a, y = b, z = c })
                                 |> BD.keep BD.unsignedInt8
@@ -405,6 +408,7 @@ pipelineTests =
             , test "fails with correct offset in pipeline" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error ( Int, Int, Int )
                         decoder =
                             BD.succeed (\a b c -> ( a, b, c ))
                                 |> BD.keep BD.unsignedInt8
@@ -418,6 +422,7 @@ pipelineTests =
             [ test "skips decoder result" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error Int
                         decoder =
                             BD.succeed identity
                                 |> BD.keep BD.unsignedInt8
@@ -428,6 +433,7 @@ pipelineTests =
             , test "advances offset past ignored bytes" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error ( Int, Int )
                         decoder =
                             BD.succeed Tuple.pair
                                 |> BD.keep BD.unsignedInt8
@@ -441,6 +447,7 @@ pipelineTests =
             [ test "skip in pipeline skips bytes between fields" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error ( Int, Int )
                         decoder =
                             BD.succeed Tuple.pair
                                 |> BD.keep BD.unsignedInt8
@@ -452,6 +459,7 @@ pipelineTests =
             , test "skip in pipeline with multiple skips" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error ( Int, Int, Int )
                         decoder =
                             BD.succeed (\a b c -> ( a, b, c ))
                                 |> BD.keep BD.unsignedInt8
@@ -465,6 +473,7 @@ pipelineTests =
             , test "fails if not enough bytes to skip" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error Int
                         decoder =
                             BD.succeed identity
                                 |> BD.keep BD.unsignedInt8
@@ -486,13 +495,32 @@ branchingTests =
         [ test "picks first matching decoder" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context String ( String, Int )
                     decoder =
                         BD.oneOf
                             [ BD.map2 (\_ v -> ( "a", v ))
-                                (BD.unsignedInt8 |> BD.andThen (\t -> if t == 1 then BD.succeed t else BD.fail "not 1"))
+                                (BD.unsignedInt8
+                                    |> BD.andThen
+                                        (\t ->
+                                            if t == 1 then
+                                                BD.succeed t
+
+                                            else
+                                                BD.fail "not 1"
+                                        )
+                                )
                                 BD.unsignedInt8
                             , BD.map2 (\_ v -> ( "b", v ))
-                                (BD.unsignedInt8 |> BD.andThen (\t -> if t == 2 then BD.succeed t else BD.fail "not 2"))
+                                (BD.unsignedInt8
+                                    |> BD.andThen
+                                        (\t ->
+                                            if t == 2 then
+                                                BD.succeed t
+
+                                            else
+                                                BD.fail "not 2"
+                                        )
+                                )
                                 BD.unsignedInt8
                             ]
                 in
@@ -501,10 +529,27 @@ branchingTests =
         , test "picks second alternative" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context String String
                     decoder =
                         BD.oneOf
-                            [ BD.unsignedInt8 |> BD.andThen (\t -> if t == 1 then BD.succeed "one" else BD.fail "not 1")
-                            , BD.unsignedInt8 |> BD.andThen (\t -> if t == 2 then BD.succeed "two" else BD.fail "not 2")
+                            [ BD.unsignedInt8
+                                |> BD.andThen
+                                    (\t ->
+                                        if t == 1 then
+                                            BD.succeed "one"
+
+                                        else
+                                            BD.fail "not 1"
+                                    )
+                            , BD.unsignedInt8
+                                |> BD.andThen
+                                    (\t ->
+                                        if t == 2 then
+                                            BD.succeed "two"
+
+                                        else
+                                            BD.fail "not 2"
+                                    )
                             ]
                 in
                 BD.decode decoder (fromList [ 2 ])
@@ -512,6 +557,7 @@ branchingTests =
         , test "collects all errors on failure" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context String value
                     decoder =
                         BD.oneOf
                             [ BD.fail "err1"
@@ -538,6 +584,7 @@ branchingTests =
                 let
                     -- First alternative reads 2 bytes then fails
                     -- Second alternative should still read from offset 0
+                    decoder : BD.Decoder context String ( Int, Int )
                     decoder =
                         BD.oneOf
                             [ BD.unsignedInt8
@@ -554,13 +601,30 @@ branchingTests =
         , test "oneOf at non-zero offset" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context String String
                     decoder =
                         BD.unsignedInt8
                             |> BD.andThen
-                                (\header ->
+                                (\_ ->
                                     BD.oneOf
-                                        [ BD.unsignedInt8 |> BD.andThen (\t -> if t == 1 then BD.succeed "one" else BD.fail "not 1")
-                                        , BD.unsignedInt8 |> BD.andThen (\t -> if t == 2 then BD.succeed "two" else BD.fail "not 2")
+                                        [ BD.unsignedInt8
+                                            |> BD.andThen
+                                                (\t ->
+                                                    if t == 1 then
+                                                        BD.succeed "one"
+
+                                                    else
+                                                        BD.fail "not 1"
+                                                )
+                                        , BD.unsignedInt8
+                                            |> BD.andThen
+                                                (\t ->
+                                                    if t == 2 then
+                                                        BD.succeed "two"
+
+                                                    else
+                                                        BD.fail "not 2"
+                                                )
                                         ]
                                 )
                 in
@@ -569,12 +633,30 @@ branchingTests =
         , test "nested oneOf" <|
             \_ ->
                 let
+                    inner : BD.Decoder context String String
                     inner =
                         BD.oneOf
-                            [ BD.unsignedInt8 |> BD.andThen (\t -> if t == 10 then BD.succeed "ten" else BD.fail "not 10")
-                            , BD.unsignedInt8 |> BD.andThen (\t -> if t == 20 then BD.succeed "twenty" else BD.fail "not 20")
+                            [ BD.unsignedInt8
+                                |> BD.andThen
+                                    (\t ->
+                                        if t == 10 then
+                                            BD.succeed "ten"
+
+                                        else
+                                            BD.fail "not 10"
+                                    )
+                            , BD.unsignedInt8
+                                |> BD.andThen
+                                    (\t ->
+                                        if t == 20 then
+                                            BD.succeed "twenty"
+
+                                        else
+                                            BD.fail "not 20"
+                                    )
                             ]
 
+                    decoder : BD.Decoder context String String
                     decoder =
                         BD.oneOf
                             [ BD.fail "skip"
@@ -597,6 +679,7 @@ loopingTests =
             [ test "decodes counted list" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error (List Int)
                         decoder =
                             BD.unsignedInt8
                                 |> BD.andThen
@@ -632,6 +715,7 @@ loopingTests =
             , test "fails mid-loop" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error (List Int)
                         decoder =
                             BD.loop
                                 (\( remaining, acc ) ->
@@ -666,6 +750,7 @@ loopingTests =
             , test "repeat with compound decoder" <|
                 \_ ->
                     let
+                        pair : BD.Decoder context error ( Int, Int )
                         pair =
                             BD.map2 Tuple.pair BD.unsignedInt8 BD.unsignedInt8
                     in
@@ -713,6 +798,7 @@ randomAccessTests =
                 \_ ->
                     let
                         -- [0, 0, 0, 42] — read the byte at offset 3
+                        decoder : BD.Decoder context error Int
                         decoder =
                             BD.randomAccess
                                 { offset = 3, relativeTo = BD.startOfInput }
@@ -724,6 +810,7 @@ randomAccessTests =
                 \_ ->
                     let
                         -- Read u8 at offset 0, jump to offset 3 for another u8, then read u8 at offset 1
+                        decoder : BD.Decoder context error ( Int, Int, Int )
                         decoder =
                             BD.succeed (\a b c -> ( a, b, c ))
                                 |> BD.keep BD.unsignedInt8
@@ -741,6 +828,7 @@ randomAccessTests =
                     let
                         -- Byte 0: length (5), Byte 1: relative offset (2), Byte 2: number (99),
                         -- Bytes 3-7: "hello"
+                        input : Bytes
                         input =
                             E.encode
                                 (E.sequence
@@ -751,6 +839,7 @@ randomAccessTests =
                                     ]
                                 )
 
+                        decoder : BD.Decoder context error String
                         decoder =
                             BD.succeed Tuple.pair
                                 |> BD.keep BD.unsignedInt8
@@ -771,6 +860,7 @@ randomAccessTests =
             , test "resumes after randomAccess in pipeline" <|
                 \_ ->
                     let
+                        input : Bytes
                         input =
                             E.encode
                                 (E.sequence
@@ -782,6 +872,7 @@ randomAccessTests =
                                     ]
                                 )
 
+                        stringAtOffset : BD.Decoder context error String
                         stringAtOffset =
                             BD.map2 Tuple.pair BD.unsignedInt8 BD.unsignedInt8
                                 |> BD.andThen
@@ -791,6 +882,7 @@ randomAccessTests =
                                             (BD.string len)
                                     )
 
+                        decoder : BD.Decoder context error { number : Int, string : String }
                         decoder =
                             BD.succeed (\s n -> { string = s, number = n })
                                 |> BD.keep stringAtOffset
@@ -801,6 +893,7 @@ randomAccessTests =
             , test "error in randomAccess propagates" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder context error Int
                         decoder =
                             BD.randomAccess
                                 { offset = 100, relativeTo = BD.startOfInput }
@@ -846,6 +939,7 @@ errorTests =
             , test "context with sequential decoders" <|
                 \_ ->
                     let
+                        decoder : BD.Decoder String error ( Int, Int )
                         decoder =
                             BD.inContext "record"
                                 (BD.map2 Tuple.pair
@@ -888,6 +982,7 @@ edgeCaseTests =
         , test "large sequential pipeline (6+ fields via nested keep)" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context error (List Int)
                     decoder =
                         BD.succeed (\a b c d e f -> [ a, b, c, d, e, f ])
                             |> BD.keep BD.unsignedInt8
@@ -902,9 +997,11 @@ edgeCaseTests =
         , test "andThen into applicative sub-decoder" <|
             \_ ->
                 let
+                    sub : BD.Decoder context error (List Int)
                     sub =
                         BD.map3 (\a b c -> [ a, b, c ]) BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8
 
+                    decoder : BD.Decoder context error (List Int)
                     decoder =
                         BD.unsignedInt8 |> BD.andThen (\_ -> sub)
                 in
@@ -913,6 +1010,7 @@ edgeCaseTests =
         , test "oneOf with applicative alternatives" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context String String
                     decoder =
                         BD.oneOf
                             [ BD.map2 (\a b -> ( a, b )) BD.unsignedInt8 BD.unsignedInt8
@@ -932,6 +1030,7 @@ edgeCaseTests =
         , test "repeat inside andThen" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context error (List Int)
                     decoder =
                         BD.unsignedInt8
                             |> BD.andThen (\count -> BD.repeat BD.unsignedInt8 count)
@@ -941,6 +1040,7 @@ edgeCaseTests =
         , test "skip 0 is no-op in pipeline" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context error Int
                     decoder =
                         BD.succeed identity
                             |> BD.keep BD.unsignedInt8
@@ -951,6 +1051,7 @@ edgeCaseTests =
         , test "deeply nested succeed" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context error Int
                     decoder =
                         BD.succeed identity
                             |> BD.keep (BD.succeed identity |> BD.keep (BD.succeed 42))
@@ -960,6 +1061,7 @@ edgeCaseTests =
         , test "oneOf with OutOfBounds collects proper errors" <|
             \_ ->
                 let
+                    decoder : BD.Decoder context error Int
                     decoder =
                         BD.oneOf
                             [ BD.unsignedInt32 BE
@@ -978,6 +1080,7 @@ edgeCaseTests =
         , test "inContext + oneOf" <|
             \_ ->
                 let
+                    decoder : BD.Decoder String String value
                     decoder =
                         BD.inContext "value"
                             (BD.oneOf
