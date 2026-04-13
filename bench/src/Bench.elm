@@ -4,6 +4,9 @@ module Bench exposing
     , raw_loop_10
     , raw_loop_100
     , raw_loop_1000
+    , raw_packet
+    , raw_message
+    , raw_tagged50
     , bd_map5
     , bd_keep5
     , bd_repeat_10
@@ -15,6 +18,9 @@ module Bench exposing
     , bd_andThen_5
     , bd_oneOf_first
     , bd_oneOf_last
+    , bd_packet
+    , bd_message
+    , bd_tagged50
     , zw_map5
     , zw_loop_10
     , zw_loop_100
@@ -22,6 +28,9 @@ module Bench exposing
     , zw_andThen_5
     , zw_oneOf_first
     , zw_oneOf_last
+    , zw_packet
+    , zw_message
+    , zw_tagged50
     , br_map5
     , br_loop_10
     , br_loop_100
@@ -29,6 +38,9 @@ module Bench exposing
     , br_andThen_5
     , br_oneOf_first
     , br_oneOf_last
+    , br_packet
+    , br_message
+    , br_tagged50
     )
 
 {-| Benchmarks comparing four Elm bytes decoding approaches.
@@ -65,6 +77,21 @@ Prefixes:
 
     elm-bench -f Bench.bd_oneOf_first -f Bench.zw_oneOf_first -f Bench.br_oneOf_first "()"
     elm-bench -f Bench.bd_oneOf_last -f Bench.zw_oneOf_last -f Bench.br_oneOf_last "()"
+
+
+## Realistic 1 — all-fast packet (48 B, pure applicative)
+
+    elm-bench -f Bench.raw_packet -f Bench.bd_packet -f Bench.zw_packet -f Bench.br_packet "()"
+
+
+## Realistic 2 — dynamic message (57 B, andThen + loop)
+
+    elm-bench -f Bench.raw_message -f Bench.bd_message -f Bench.zw_message -f Bench.br_message "()"
+
+
+## Realistic 3 — 50 tagged records with oneOf (175 B)
+
+    elm-bench -f Bench.raw_tagged50 -f Bench.bd_tagged50 -f Bench.zw_tagged50 -f Bench.br_tagged50 "()"
 
 -}
 
@@ -144,14 +171,108 @@ oneOfLastData =
         )
 
 
+{-| Realistic 1: binary packet header + payload (48 bytes).
+Exercises all primitive types + applicative combinators (keep, skip, ignore, repeat).
+-}
+packetData : Bytes
+packetData =
+    E.encode
+        (E.sequence
+            [ E.unsignedInt32 BE 0xDEADBEEF -- magic
+            , E.unsignedInt16 BE 1 -- version
+            , E.signedInt8 -1 -- flags
+            , E.unsignedInt8 0 -- padding (skip)
+            , E.float32 BE 1.5 -- temperature
+            , E.float64 BE 3.14159 -- timestamp
+            , E.unsignedInt8 0xCA -- payload byte 1
+            , E.unsignedInt8 0xFE -- payload byte 2
+            , E.unsignedInt8 0xBA -- payload byte 3
+            , E.unsignedInt8 0xBE -- payload byte 4
+            , E.string "Elm" -- label (3 bytes)
+            , E.unsignedInt8 0xFF -- checksum (ignore)
+            , E.sequence (List.map (E.unsignedInt16 BE) (List.range 1 10)) -- 10 u16 samples
+            ]
+        )
 
--- ============================================================================
--- RAW elm/bytes
--- ============================================================================
+
+{-| Realistic 2: length-prefixed message (57 bytes).
+Header (map4) + andThen on fieldCount + loop of (s32,f64) pairs + trailer (map4).
+-}
+messageData : Bytes
+messageData =
+    E.encode
+        (E.sequence
+            [ E.unsignedInt32 BE 0xCAFEBABE -- magic
+            , E.unsignedInt16 BE 1 -- version
+            , E.signedInt8 -5 -- priority
+            , E.unsignedInt8 3 -- fieldCount
+            , E.signedInt32 BE 100 -- field 1 key
+            , E.float64 BE 1.1 -- field 1 value
+            , E.signedInt32 BE 200 -- field 2 key
+            , E.float64 BE 2.2 -- field 2 value
+            , E.signedInt32 BE 300 -- field 3 key
+            , E.float64 BE 3.3 -- field 3 value
+            , E.float32 BE 99.9 -- checksum
+            , E.signedInt16 BE -42 -- code
+            , E.unsignedInt8 0xDE -- tag byte 1
+            , E.unsignedInt8 0xAD -- tag byte 2
+            , E.unsignedInt8 0xBE -- tag byte 3
+            , E.unsignedInt8 0xEF -- tag byte 4
+            , E.string "End" -- label (3 bytes)
+            ]
+        )
+
+
+{-| Realistic 3: 50 tagged records alternating tag 0 and tag 2 (175 bytes).
+25 tag-0 records (2 B each) + 25 tag-2 records (5 B each).
+-}
+tagged50Data : Bytes
+tagged50Data =
+    E.encode
+        (E.sequence
+            (List.concatMap
+                (\i ->
+                    if modBy 2 i == 0 then
+                        [ E.unsignedInt8 0, E.unsignedInt8 (i * 3) ]
+
+                    else
+                        [ E.unsignedInt8 2, E.unsignedInt8 i, E.unsignedInt8 (i * 2), E.unsignedInt8 (i + 10), E.unsignedInt8 (i * 5) ]
+                )
+                (List.range 0 49)
+            )
+        )
+
+
+
+-- SHARED TYPES
 
 
 type alias Record5 =
     { a : Int, b : Int, c : Int, d : Int, e : Int }
+
+
+type alias Packet =
+    { magic : Int
+    , version : Int
+    , flags : Int
+    , temperature : Float
+    , timestamp : Float
+    , payload : Bytes
+    , label : String
+    , samples : List Int
+    }
+
+
+type alias Message =
+    { magic : Int
+    , version : Int
+    , priority : Int
+    , fields : List ( Int, Float )
+    , checksum : Float
+    , code : Int
+    , tag : Bytes
+    , label : String
+    }
 
 
 raw_map5 : () -> Maybe Record5
@@ -208,6 +329,124 @@ raw_loop_100 () =
 raw_loop_1000 : () -> Maybe (List Float)
 raw_loop_1000 () =
     D.decode (rawLoopFloat64 1000) floats1000
+
+
+
+-- Realistic benchmarks
+
+
+raw_packet : () -> Maybe Packet
+raw_packet () =
+    D.decode rawPacketDecoder packetData
+
+
+rawPacketDecoder : D.Decoder Packet
+rawPacketDecoder =
+    D.map5
+        (\magic version flags _ temperature ->
+            Packet magic version flags temperature
+        )
+        (D.unsignedInt32 BE)
+        (D.unsignedInt16 BE)
+        D.signedInt8
+        (D.bytes 1)
+        (D.float32 BE)
+        |> D.andThen
+            (\partial ->
+                D.map5
+                    (\timestamp payload label _ samples ->
+                        partial timestamp payload label samples
+                    )
+                    (D.float64 BE)
+                    (D.bytes 4)
+                    (D.string 3)
+                    (D.bytes 1)
+                    (D.loop ( 10, [] )
+                        (\( remaining, acc ) ->
+                            if remaining <= 0 then
+                                D.succeed (D.Done (List.reverse acc))
+
+                            else
+                                D.map (\v -> D.Loop ( remaining - 1, v :: acc )) (D.unsignedInt16 BE)
+                        )
+                    )
+            )
+
+
+raw_message : () -> Maybe Message
+raw_message () =
+    D.decode rawMessageDecoder messageData
+
+
+rawMessageDecoder : D.Decoder Message
+rawMessageDecoder =
+    D.map3 (\magic version priority -> ( magic, version, priority ))
+        (D.unsignedInt32 BE)
+        (D.unsignedInt16 BE)
+        D.signedInt8
+        |> D.andThen
+            (\( magic, version, priority ) ->
+                D.unsignedInt8
+                    |> D.andThen
+                        (\fieldCount ->
+                            D.loop ( fieldCount, [] )
+                                (\( remaining, acc ) ->
+                                    if remaining <= 0 then
+                                        D.succeed (D.Done (List.reverse acc))
+
+                                    else
+                                        D.map2 (\k v -> D.Loop ( remaining - 1, ( k, v ) :: acc ))
+                                            (D.signedInt32 BE)
+                                            (D.float64 BE)
+                                )
+                                |> D.andThen
+                                    (\fields ->
+                                        D.map4
+                                            (\checksum code tag label ->
+                                                Message magic version priority fields checksum code tag label
+                                            )
+                                            (D.float32 BE)
+                                            (D.signedInt16 BE)
+                                            (D.bytes 4)
+                                            (D.string 3)
+                                    )
+                        )
+            )
+
+
+raw_tagged50 : () -> Maybe (List OneOfResult)
+raw_tagged50 () =
+    D.decode
+        (D.loop ( 50, [] )
+            (\( remaining, acc ) ->
+                if remaining <= 0 then
+                    D.succeed (D.Done (List.reverse acc))
+
+                else
+                    D.map (\v -> D.Loop ( remaining - 1, v :: acc )) rawTaggedDecoder
+            )
+        )
+        tagged50Data
+
+
+rawTaggedDecoder : D.Decoder OneOfResult
+rawTaggedDecoder =
+    D.unsignedInt8
+        |> D.andThen
+            (\tag ->
+                case tag of
+                    0 ->
+                        D.map Tag0 D.unsignedInt8
+
+                    1 ->
+                        D.map2 Tag1 D.unsignedInt8 D.unsignedInt8
+
+                    2 ->
+                        D.map4 Tag2 D.unsignedInt8 D.unsignedInt8 D.unsignedInt8 D.unsignedInt8
+
+                    _ ->
+                        D.fail
+            )
 
 
 
@@ -331,6 +570,87 @@ bd_oneOf_last () =
 
 
 
+-- Realistic benchmarks
+
+
+bd_packet : () -> Maybe Packet
+bd_packet () =
+    BD.decode bdPacketDecoder packetData |> Result.toMaybe
+
+
+bdPacketDecoder : BD.Decoder e Packet
+bdPacketDecoder =
+    BD.succeed Packet
+        |> BD.keep (BD.unsignedInt32 BE)
+        |> BD.keep (BD.unsignedInt16 BE)
+        |> BD.keep BD.signedInt8
+        |> BD.skip 1
+        |> BD.keep (BD.float32 BE)
+        |> BD.keep (BD.float64 BE)
+        |> BD.keep (BD.bytes 4)
+        |> BD.keep (BD.string 3)
+        |> BD.ignore BD.unsignedInt8
+        |> BD.keep (BD.repeat (BD.unsignedInt16 BE) 10)
+
+
+bd_message : () -> Maybe Message
+bd_message () =
+    BD.decode bdMessageDecoder messageData |> Result.toMaybe
+
+
+bdMessageDecoder : BD.Decoder e Message
+bdMessageDecoder =
+    BD.map3 (\magic version priority -> ( magic, version, priority ))
+        (BD.unsignedInt32 BE)
+        (BD.unsignedInt16 BE)
+        BD.signedInt8
+        |> BD.andThen
+            (\( magic, version, priority ) ->
+                BD.unsignedInt8
+                    |> BD.andThen
+                        (\fieldCount ->
+                            BD.loop ( fieldCount, [] )
+                                (\( remaining, acc ) ->
+                                    if remaining <= 0 then
+                                        BD.succeed (BD.Done (List.reverse acc))
+
+                                    else
+                                        BD.map2 (\k v -> BD.Loop ( remaining - 1, ( k, v ) :: acc ))
+                                            (BD.signedInt32 BE)
+                                            (BD.float64 BE)
+                                )
+                                |> BD.andThen
+                                    (\fields ->
+                                        BD.map4
+                                            (\checksum code tag label ->
+                                                Message magic version priority fields checksum code tag label
+                                            )
+                                            (BD.float32 BE)
+                                            (BD.signedInt16 BE)
+                                            (BD.bytes 4)
+                                            (BD.string 3)
+                                    )
+                        )
+            )
+
+
+bd_tagged50 : () -> Maybe (List OneOfResult)
+bd_tagged50 () =
+    BD.decode
+        (BD.loop ( 50, [] )
+            (\( remaining, acc ) ->
+                if remaining <= 0 then
+                    BD.succeed (BD.Done (List.reverse acc))
+
+                else
+                    BD.map (\v -> BD.Loop ( remaining - 1, v :: acc )) bdOneOfDecoder
+            )
+        )
+        tagged50Data
+        |> Result.toMaybe
+
+
+
 -- ============================================================================
 -- zwilias/elm-bytes-parser (ZW)
 -- ============================================================================
@@ -417,6 +737,89 @@ zw_oneOf_last () =
 
 
 
+-- Realistic benchmarks
+
+
+zw_packet : () -> Maybe Packet
+zw_packet () =
+    ZW.run zwPacketDecoder packetData |> Result.toMaybe
+
+
+zwPacketDecoder : ZW.Parser c e Packet
+zwPacketDecoder =
+    ZW.succeed Packet
+        |> ZW.keep (ZW.unsignedInt32 BE)
+        |> ZW.keep (ZW.unsignedInt16 BE)
+        |> ZW.keep ZW.signedInt8
+        |> ZW.skip 1
+        |> ZW.keep (ZW.float32 BE)
+        |> ZW.keep (ZW.float64 BE)
+        |> ZW.keep (ZW.bytes 4)
+        |> ZW.keep (ZW.string 3)
+        |> ZW.ignore ZW.unsignedInt8
+        |> ZW.keep (ZW.repeat (ZW.unsignedInt16 BE) 10)
+
+
+zw_message : () -> Maybe Message
+zw_message () =
+    ZW.run zwMessageDecoder messageData |> Result.toMaybe
+
+
+zwMessageDecoder : ZW.Parser c e Message
+zwMessageDecoder =
+    ZW.map3 (\magic version priority -> ( magic, version, priority ))
+        (ZW.unsignedInt32 BE)
+        (ZW.unsignedInt16 BE)
+        ZW.signedInt8
+        |> ZW.andThen
+            (\( magic, version, priority ) ->
+                ZW.unsignedInt8
+                    |> ZW.andThen
+                        (\fieldCount ->
+                            ZW.loop
+                                (\( remaining, acc ) ->
+                                    if remaining <= 0 then
+                                        ZW.succeed (ZW.Done (List.reverse acc))
+
+                                    else
+                                        ZW.map2 (\k v -> ZW.Loop ( remaining - 1, ( k, v ) :: acc ))
+                                            (ZW.signedInt32 BE)
+                                            (ZW.float64 BE)
+                                )
+                                ( fieldCount, [] )
+                                |> ZW.andThen
+                                    (\fields ->
+                                        ZW.map4
+                                            (\checksum code tag label ->
+                                                Message magic version priority fields checksum code tag label
+                                            )
+                                            (ZW.float32 BE)
+                                            (ZW.signedInt16 BE)
+                                            (ZW.bytes 4)
+                                            (ZW.string 3)
+                                    )
+                        )
+            )
+
+
+zw_tagged50 : () -> Maybe (List OneOfResult)
+zw_tagged50 () =
+    ZW.run
+        (ZW.loop
+            (\( remaining, acc ) ->
+                if remaining <= 0 then
+                    ZW.succeed (ZW.Done (List.reverse acc))
+
+                else
+                    ZW.map (\v -> ZW.Loop ( remaining - 1, v :: acc )) zwOneOfDecoder
+            )
+            ( 50, [] )
+        )
+        tagged50Data
+        |> Result.toMaybe
+
+
+
 -- ============================================================================
 -- mpizenberg/elm-bytes-decoder Branchable (BR)
 -- ============================================================================
@@ -497,3 +900,83 @@ br_oneOf_first () =
 br_oneOf_last : () -> Maybe OneOfResult
 br_oneOf_last () =
     BR.decode brOneOfDecoder oneOfLastData
+
+
+
+-- Realistic benchmarks
+
+
+br_packet : () -> Maybe Packet
+br_packet () =
+    BR.decode brPacketDecoder packetData
+
+
+brPacketDecoder : BR.Decoder Packet
+brPacketDecoder =
+    BR.succeed Packet
+        |> BR.keep (BR.unsignedInt32 BE)
+        |> BR.keep (BR.unsignedInt16 BE)
+        |> BR.keep BR.signedInt8
+        |> BR.skip 1
+        |> BR.keep (BR.float32 BE)
+        |> BR.keep (BR.float64 BE)
+        |> BR.keep (BR.bytes 4)
+        |> BR.keep (BR.string 3)
+        |> BR.ignore BR.unsignedInt8
+        |> BR.keep (BR.repeat (BR.unsignedInt16 BE) 10)
+
+
+br_message : () -> Maybe Message
+br_message () =
+    BR.decode brMessageDecoder messageData
+
+
+brMessageDecoder : BR.Decoder Message
+brMessageDecoder =
+    BR.map3 (\magic version priority -> ( magic, version, priority ))
+        (BR.unsignedInt32 BE)
+        (BR.unsignedInt16 BE)
+        BR.signedInt8
+        |> BR.andThen
+            (\( magic, version, priority ) ->
+                BR.unsignedInt8
+                    |> BR.andThen
+                        (\fieldCount ->
+                            BR.loop ( fieldCount, [] )
+                                (\( remaining, acc ) ->
+                                    if remaining <= 0 then
+                                        BR.succeed (D.Done (List.reverse acc))
+
+                                    else
+                                        BR.map2 (\k v -> D.Loop ( remaining - 1, ( k, v ) :: acc ))
+                                            (BR.signedInt32 BE)
+                                            (BR.float64 BE)
+                                )
+                                |> BR.andThen
+                                    (\fields ->
+                                        BR.map4
+                                            (\checksum code tag label ->
+                                                Message magic version priority fields checksum code tag label
+                                            )
+                                            (BR.float32 BE)
+                                            (BR.signedInt16 BE)
+                                            (BR.bytes 4)
+                                            (BR.string 3)
+                                    )
+                        )
+            )
+
+
+br_tagged50 : () -> Maybe (List OneOfResult)
+br_tagged50 () =
+    BR.decode
+        (BR.loop ( 50, [] )
+            (\( remaining, acc ) ->
+                if remaining <= 0 then
+                    BR.succeed (D.Done (List.reverse acc))
+
+                else
+                    BR.map (\v -> D.Loop ( remaining - 1, v :: acc )) brOneOfDecoder
+            )
+        )
+        tagged50Data
