@@ -70,7 +70,7 @@ With optimized `map2` these improve automatically, but they still go through the
 
 ### 4. Remove `stack` from State — LOW-MEDIUM impact
 
-- [ ] Implement
+- [x] Implement
 
 `stack : List Int` is never read or written anywhere in the codebase. Every `{ state | offset = ... }` record update copies it. Removing it shrinks every state allocation from 3 fields to 2.
 

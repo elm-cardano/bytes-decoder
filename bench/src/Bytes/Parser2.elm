@@ -105,7 +105,6 @@ type Error context error
 
 type alias State =
     { offset : Int
-    , stack : List Int
     , input : Bytes
     }
 
@@ -263,9 +262,9 @@ randomAccess config (Parser f) =
                 (Position start) =
                     config.relativeTo
             in
-            case f { state | offset = start + config.offset } of
+            case f { offset = start + config.offset, input = state.input } of
                 Good v newState ->
-                    Good v { newState | offset = state.offset }
+                    Good v { offset = state.offset, input = newState.input }
 
                 Bad e ->
                     Bad e
@@ -382,7 +381,6 @@ run (Parser f) input =
         initialState : State
         initialState =
             { offset = 0
-            , stack = []
             , input = input
             }
     in
@@ -990,7 +988,7 @@ fromDecoder dec byteLength =
             in
             case Decode.decode combined state.input of
                 Just res ->
-                    Good res { state | offset = state.offset + byteLength }
+                    Good res { offset = state.offset + byteLength, input = state.input }
 
                 Nothing ->
                     Bad (OutOfBounds { at = state.offset, bytes = byteLength })
