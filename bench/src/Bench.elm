@@ -1,56 +1,56 @@
 module Bench exposing
-    ( raw_map5
+    ( bd_andThen_5
+    , bd_keep5
+    , bd_loop_10
+    , bd_loop_100
+    , bd_loop_1000
+    , bd_map5
+    , bd_message
+    , bd_oneOf_first
+    , bd_oneOf_last
+    , bd_packet
+    , bd_repeat_10
+    , bd_repeat_100
+    , bd_repeat_1000
+    , bd_tagged50
+    , br_andThen_5
+    , br_loop_10
+    , br_loop_100
+    , br_loop_1000
+    , br_map5
+    , br_message
+    , br_oneOf_first
+    , br_oneOf_last
+    , br_packet
+    , br_tagged50
+    , p2_andThen_5
+    , p2_loop_10
+    , p2_loop_100
+    , p2_loop_1000
+    , p2_map5
+    , p2_message
+    , p2_oneOf_first
+    , p2_oneOf_last
+    , p2_packet
+    , p2_tagged50
     , raw_andThen_5
     , raw_loop_10
     , raw_loop_100
     , raw_loop_1000
-    , raw_packet
+    , raw_map5
     , raw_message
+    , raw_packet
     , raw_tagged50
-    , bd_map5
-    , bd_keep5
-    , bd_repeat_10
-    , bd_repeat_100
-    , bd_repeat_1000
-    , bd_loop_10
-    , bd_loop_100
-    , bd_loop_1000
-    , bd_andThen_5
-    , bd_oneOf_first
-    , bd_oneOf_last
-    , bd_packet
-    , bd_message
-    , bd_tagged50
-    , zw_map5
+    , zw_andThen_5
     , zw_loop_10
     , zw_loop_100
     , zw_loop_1000
-    , zw_andThen_5
+    , zw_map5
+    , zw_message
     , zw_oneOf_first
     , zw_oneOf_last
     , zw_packet
-    , zw_message
     , zw_tagged50
-    , p2_map5
-    , p2_loop_10
-    , p2_loop_100
-    , p2_loop_1000
-    , p2_andThen_5
-    , p2_oneOf_first
-    , p2_oneOf_last
-    , p2_packet
-    , p2_message
-    , p2_tagged50
-    , br_map5
-    , br_loop_10
-    , br_loop_100
-    , br_loop_1000
-    , br_andThen_5
-    , br_oneOf_first
-    , br_oneOf_last
-    , br_packet
-    , br_message
-    , br_tagged50
     )
 
 {-| Benchmarks comparing five Elm bytes decoding approaches.
@@ -66,43 +66,44 @@ Prefixes:
 
 ## Sequential (applicative) — map5, 5 fields
 
-    elm-bench -f Bench.raw_map5 -f Bench.bd_map5 -f Bench.zw_map5 -f Bench.p2_map5 -f Bench.br_map5 "()"
+    elm - bench -f Bench.raw_map5 -f Bench.bd_map5 -f Bench.zw_map5 -f Bench.p2_map5 -f Bench.br_map5 "()"
 
 
 ## Loop — 100 float64s
 
-    elm-bench -f Bench.raw_loop_100 -f Bench.bd_repeat_100 -f Bench.bd_loop_100 -f Bench.zw_loop_100 -f Bench.p2_loop_100 -f Bench.br_loop_100 "()"
+    elm - bench -f Bench.raw_loop_100 -f Bench.bd_repeat_100 -f Bench.bd_loop_100 -f Bench.zw_loop_100 -f Bench.p2_loop_100 -f Bench.br_loop_100 "()"
 
 
 ## Loop — 1000 float64s
 
-    elm-bench -f Bench.raw_loop_1000 -f Bench.bd_repeat_1000 -f Bench.bd_loop_1000 -f Bench.zw_loop_1000 -f Bench.p2_loop_1000 -f Bench.br_loop_1000 "()"
+    elm - bench -f Bench.raw_loop_1000 -f Bench.bd_repeat_1000 -f Bench.bd_loop_1000 -f Bench.zw_loop_1000 -f Bench.p2_loop_1000 -f Bench.br_loop_1000 "()"
 
 
 ## andThen — 5 fields via chained andThen
 
-    elm-bench -f Bench.raw_andThen_5 -f Bench.bd_andThen_5 -f Bench.zw_andThen_5 -f Bench.p2_andThen_5 -f Bench.br_andThen_5 "()"
+    elm - bench -f Bench.raw_andThen_5 -f Bench.bd_andThen_5 -f Bench.zw_andThen_5 -f Bench.p2_andThen_5 -f Bench.br_andThen_5 "()"
 
 
 ## oneOf — first and last alternative
 
-    elm-bench -f Bench.bd_oneOf_first -f Bench.zw_oneOf_first -f Bench.p2_oneOf_first -f Bench.br_oneOf_first "()"
-    elm-bench -f Bench.bd_oneOf_last -f Bench.zw_oneOf_last -f Bench.p2_oneOf_last -f Bench.br_oneOf_last "()"
+    elm - bench -f Bench.bd_oneOf_first -f Bench.zw_oneOf_first -f Bench.p2_oneOf_first -f Bench.br_oneOf_first "()"
+
+    elm - bench -f Bench.bd_oneOf_last -f Bench.zw_oneOf_last -f Bench.p2_oneOf_last -f Bench.br_oneOf_last "()"
 
 
 ## Realistic 1 — all-fast packet (48 B, pure applicative)
 
-    elm-bench -f Bench.raw_packet -f Bench.bd_packet -f Bench.zw_packet -f Bench.p2_packet -f Bench.br_packet "()"
+    elm - bench -f Bench.raw_packet -f Bench.bd_packet -f Bench.zw_packet -f Bench.p2_packet -f Bench.br_packet "()"
 
 
 ## Realistic 2 — dynamic message (57 B, andThen + loop)
 
-    elm-bench -f Bench.raw_message -f Bench.bd_message -f Bench.zw_message -f Bench.p2_message -f Bench.br_message "()"
+    elm - bench -f Bench.raw_message -f Bench.bd_message -f Bench.zw_message -f Bench.p2_message -f Bench.br_message "()"
 
 
 ## Realistic 3 — 50 tagged records with oneOf (175 B)
 
-    elm-bench -f Bench.raw_tagged50 -f Bench.bd_tagged50 -f Bench.zw_tagged50 -f Bench.p2_tagged50 -f Bench.br_tagged50 "()"
+    elm - bench -f Bench.raw_tagged50 -f Bench.bd_tagged50 -f Bench.zw_tagged50 -f Bench.p2_tagged50 -f Bench.br_tagged50 "()"
 
 -}
 
@@ -566,9 +567,33 @@ type OneOfResult
 bdOneOfDecoder : BD.Decoder c String OneOfResult
 bdOneOfDecoder =
     BD.oneOf
-        [ BD.unsignedInt8 |> BD.andThen (\t -> if t == 0 then BD.map Tag0 BD.unsignedInt8 else BD.fail "not 0")
-        , BD.unsignedInt8 |> BD.andThen (\t -> if t == 1 then BD.map2 Tag1 BD.unsignedInt8 BD.unsignedInt8 else BD.fail "not 1")
-        , BD.unsignedInt8 |> BD.andThen (\t -> if t == 2 then BD.map4 Tag2 BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8 else BD.fail "not 2")
+        [ BD.unsignedInt8
+            |> BD.andThen
+                (\t ->
+                    if t == 0 then
+                        BD.map Tag0 BD.unsignedInt8
+
+                    else
+                        BD.fail "not 0"
+                )
+        , BD.unsignedInt8
+            |> BD.andThen
+                (\t ->
+                    if t == 1 then
+                        BD.map2 Tag1 BD.unsignedInt8 BD.unsignedInt8
+
+                    else
+                        BD.fail "not 1"
+                )
+        , BD.unsignedInt8
+            |> BD.andThen
+                (\t ->
+                    if t == 2 then
+                        BD.map4 Tag2 BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8
+
+                    else
+                        BD.fail "not 2"
+                )
         ]
 
 
@@ -735,9 +760,33 @@ zw_andThen_5 () =
 zwOneOfDecoder : ZW.Parser c String OneOfResult
 zwOneOfDecoder =
     ZW.oneOf
-        [ ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 0 then ZW.map Tag0 ZW.unsignedInt8 else ZW.fail "not 0")
-        , ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 1 then ZW.map2 Tag1 ZW.unsignedInt8 ZW.unsignedInt8 else ZW.fail "not 1")
-        , ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 2 then ZW.map4 Tag2 ZW.unsignedInt8 ZW.unsignedInt8 ZW.unsignedInt8 ZW.unsignedInt8 else ZW.fail "not 2")
+        [ ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 0 then
+                        ZW.map Tag0 ZW.unsignedInt8
+
+                    else
+                        ZW.fail "not 0"
+                )
+        , ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 1 then
+                        ZW.map2 Tag1 ZW.unsignedInt8 ZW.unsignedInt8
+
+                    else
+                        ZW.fail "not 1"
+                )
+        , ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 2 then
+                        ZW.map4 Tag2 ZW.unsignedInt8 ZW.unsignedInt8 ZW.unsignedInt8 ZW.unsignedInt8
+
+                    else
+                        ZW.fail "not 2"
+                )
         ]
 
 
@@ -904,9 +953,33 @@ p2_andThen_5 () =
 p2OneOfDecoder : P2.Parser c String OneOfResult
 p2OneOfDecoder =
     P2.oneOf
-        [ P2.unsignedInt8 |> P2.andThen (\t -> if t == 0 then P2.map Tag0 P2.unsignedInt8 else P2.fail "not 0")
-        , P2.unsignedInt8 |> P2.andThen (\t -> if t == 1 then P2.map2 Tag1 P2.unsignedInt8 P2.unsignedInt8 else P2.fail "not 1")
-        , P2.unsignedInt8 |> P2.andThen (\t -> if t == 2 then P2.map4 Tag2 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 else P2.fail "not 2")
+        [ P2.unsignedInt8
+            |> P2.andThen
+                (\t ->
+                    if t == 0 then
+                        P2.map Tag0 P2.unsignedInt8
+
+                    else
+                        P2.fail "not 0"
+                )
+        , P2.unsignedInt8
+            |> P2.andThen
+                (\t ->
+                    if t == 1 then
+                        P2.map2 Tag1 P2.unsignedInt8 P2.unsignedInt8
+
+                    else
+                        P2.fail "not 1"
+                )
+        , P2.unsignedInt8
+            |> P2.andThen
+                (\t ->
+                    if t == 2 then
+                        P2.map4 Tag2 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8
+
+                    else
+                        P2.fail "not 2"
+                )
         ]
 
 
@@ -1070,9 +1143,33 @@ br_andThen_5 () =
 brOneOfDecoder : BR.Decoder OneOfResult
 brOneOfDecoder =
     BR.oneOf
-        [ BR.unsignedInt8 |> BR.andThen (\t -> if t == 0 then BR.map Tag0 BR.unsignedInt8 else BR.fail)
-        , BR.unsignedInt8 |> BR.andThen (\t -> if t == 1 then BR.map2 Tag1 BR.unsignedInt8 BR.unsignedInt8 else BR.fail)
-        , BR.unsignedInt8 |> BR.andThen (\t -> if t == 2 then BR.map4 Tag2 BR.unsignedInt8 BR.unsignedInt8 BR.unsignedInt8 BR.unsignedInt8 else BR.fail)
+        [ BR.unsignedInt8
+            |> BR.andThen
+                (\t ->
+                    if t == 0 then
+                        BR.map Tag0 BR.unsignedInt8
+
+                    else
+                        BR.fail
+                )
+        , BR.unsignedInt8
+            |> BR.andThen
+                (\t ->
+                    if t == 1 then
+                        BR.map2 Tag1 BR.unsignedInt8 BR.unsignedInt8
+
+                    else
+                        BR.fail
+                )
+        , BR.unsignedInt8
+            |> BR.andThen
+                (\t ->
+                    if t == 2 then
+                        BR.map4 Tag2 BR.unsignedInt8 BR.unsignedInt8 BR.unsignedInt8 BR.unsignedInt8
+
+                    else
+                        BR.fail
+                )
         ]
 
 

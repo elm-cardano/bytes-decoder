@@ -6,6 +6,7 @@ approaches, across a variety of failure scenarios.
 Build with:
 
     cd examples
+
     elm reactor
 
 -}
@@ -142,16 +143,16 @@ scenario3_unknownTag =
     , inputDesc = "[0xFF, 0x01, 0x02] (3 bytes)"
     , input = input
     , rawResult =
-        D.decode (D.unsignedInt8 |> D.andThen (rawTagDispatch)) input
+        D.decode (D.unsignedInt8 |> D.andThen rawTagDispatch) input
             |> showMaybe
     , bdResult =
-        BD.decode (BD.unsignedInt8 |> BD.andThen (bdTagDispatch)) input
+        BD.decode (BD.unsignedInt8 |> BD.andThen bdTagDispatch) input
             |> showBdResult
     , zwResult =
-        ZW.run (ZW.unsignedInt8 |> ZW.andThen (zwTagDispatch)) input
+        ZW.run (ZW.unsignedInt8 |> ZW.andThen zwTagDispatch) input
             |> showZwResult
     , brResult =
-        BR.decode (BR.unsignedInt8 |> BR.andThen (brTagDispatch)) input
+        BR.decode (BR.unsignedInt8 |> BR.andThen brTagDispatch) input
             |> showMaybe
     }
 
@@ -368,27 +369,99 @@ brTagDispatch tag =
 bdTagOneOf : BD.Decoder c String Int
 bdTagOneOf =
     BD.oneOf
-        [ BD.unsignedInt8 |> BD.andThen (\t -> if t == 0 then BD.unsignedInt8 else BD.fail ("tag " ++ String.fromInt t ++ " /= 0"))
-        , BD.unsignedInt8 |> BD.andThen (\t -> if t == 1 then BD.unsignedInt16 BE else BD.fail ("tag " ++ String.fromInt t ++ " /= 1"))
-        , BD.unsignedInt8 |> BD.andThen (\t -> if t == 2 then BD.unsignedInt32 BE else BD.fail ("tag " ++ String.fromInt t ++ " /= 2"))
+        [ BD.unsignedInt8
+            |> BD.andThen
+                (\t ->
+                    if t == 0 then
+                        BD.unsignedInt8
+
+                    else
+                        BD.fail ("tag " ++ String.fromInt t ++ " /= 0")
+                )
+        , BD.unsignedInt8
+            |> BD.andThen
+                (\t ->
+                    if t == 1 then
+                        BD.unsignedInt16 BE
+
+                    else
+                        BD.fail ("tag " ++ String.fromInt t ++ " /= 1")
+                )
+        , BD.unsignedInt8
+            |> BD.andThen
+                (\t ->
+                    if t == 2 then
+                        BD.unsignedInt32 BE
+
+                    else
+                        BD.fail ("tag " ++ String.fromInt t ++ " /= 2")
+                )
         ]
 
 
 zwTagOneOf : ZW.Parser String String Int
 zwTagOneOf =
     ZW.oneOf
-        [ ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 0 then ZW.unsignedInt8 else ZW.fail ("tag " ++ String.fromInt t ++ " /= 0"))
-        , ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 1 then ZW.unsignedInt16 BE else ZW.fail ("tag " ++ String.fromInt t ++ " /= 1"))
-        , ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 2 then ZW.unsignedInt32 BE else ZW.fail ("tag " ++ String.fromInt t ++ " /= 2"))
+        [ ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 0 then
+                        ZW.unsignedInt8
+
+                    else
+                        ZW.fail ("tag " ++ String.fromInt t ++ " /= 0")
+                )
+        , ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 1 then
+                        ZW.unsignedInt16 BE
+
+                    else
+                        ZW.fail ("tag " ++ String.fromInt t ++ " /= 1")
+                )
+        , ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 2 then
+                        ZW.unsignedInt32 BE
+
+                    else
+                        ZW.fail ("tag " ++ String.fromInt t ++ " /= 2")
+                )
         ]
 
 
 brTagOneOf : BR.Decoder Int
 brTagOneOf =
     BR.oneOf
-        [ BR.unsignedInt8 |> BR.andThen (\t -> if t == 0 then BR.unsignedInt8 else BR.fail)
-        , BR.unsignedInt8 |> BR.andThen (\t -> if t == 1 then BR.unsignedInt16 BE else BR.fail)
-        , BR.unsignedInt8 |> BR.andThen (\t -> if t == 2 then BR.unsignedInt32 BE else BR.fail)
+        [ BR.unsignedInt8
+            |> BR.andThen
+                (\t ->
+                    if t == 0 then
+                        BR.unsignedInt8
+
+                    else
+                        BR.fail
+                )
+        , BR.unsignedInt8
+            |> BR.andThen
+                (\t ->
+                    if t == 1 then
+                        BR.unsignedInt16 BE
+
+                    else
+                        BR.fail
+                )
+        , BR.unsignedInt8
+            |> BR.andThen
+                (\t ->
+                    if t == 2 then
+                        BR.unsignedInt32 BE
+
+                    else
+                        BR.fail
+                )
         ]
 
 

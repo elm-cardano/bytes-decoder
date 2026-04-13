@@ -1,59 +1,70 @@
 module BenchZw exposing
-    ( zw_map2
-    , zw_keep5
-    , zw_map5
-    , zw_repeat_100
-    , zw_loop_10
-    , zw_loop_100
-    , zw_loop_1000
-    , zw_andThen_5
-    , zw_oneOf_first
-    , zw_oneOf_last
-    , zw_packet
-    , zw_message
-    , zw_tagged50
-    , p2_map2
+    ( p2_andThen_5
     , p2_keep5
-    , p2_map5
-    , p2_repeat_100
     , p2_loop_10
     , p2_loop_100
     , p2_loop_1000
-    , p2_andThen_5
+    , p2_map2
+    , p2_map5
+    , p2_message
     , p2_oneOf_first
     , p2_oneOf_last
     , p2_packet
-    , p2_message
+    , p2_repeat_100
     , p2_tagged50
-    , p3_map2
+    , p3_andThen_5
     , p3_keep5
-    , p3_map5
-    , p3_repeat_100
     , p3_loop_10
     , p3_loop_100
     , p3_loop_1000
-    , p3_andThen_5
+    , p3_map2
+    , p3_map5
+    , p3_message
     , p3_oneOf_first
     , p3_oneOf_last
     , p3_packet
-    , p3_message
+    , p3_repeat_100
     , p3_tagged50
+    , zw_andThen_5
+    , zw_keep5
+    , zw_loop_10
+    , zw_loop_100
+    , zw_loop_1000
+    , zw_map2
+    , zw_map5
+    , zw_message
+    , zw_oneOf_first
+    , zw_oneOf_last
+    , zw_packet
+    , zw_repeat_100
+    , zw_tagged50
     )
 
 {-| Head-to-head benchmarks: zwilias/elm-bytes-parser (ZW) vs Bytes.Parser2 (P2).
 
-    elm-bench -f BenchZw.zw_map2 -f BenchZw.p2_map2 "()"
-    elm-bench -f BenchZw.zw_keep5 -f BenchZw.p2_keep5 "()"
-    elm-bench -f BenchZw.zw_map5 -f BenchZw.p2_map5 "()"
-    elm-bench -f BenchZw.zw_repeat_100 -f BenchZw.p2_repeat_100 "()"
-    elm-bench -f BenchZw.zw_loop_100 -f BenchZw.p2_loop_100 "()"
-    elm-bench -f BenchZw.zw_loop_1000 -f BenchZw.p2_loop_1000 "()"
-    elm-bench -f BenchZw.zw_andThen_5 -f BenchZw.p2_andThen_5 "()"
-    elm-bench -f BenchZw.zw_oneOf_first -f BenchZw.p2_oneOf_first "()"
-    elm-bench -f BenchZw.zw_oneOf_last -f BenchZw.p2_oneOf_last "()"
-    elm-bench -f BenchZw.zw_packet -f BenchZw.p2_packet "()"
-    elm-bench -f BenchZw.zw_message -f BenchZw.p2_message "()"
-    elm-bench -f BenchZw.zw_tagged50 -f BenchZw.p2_tagged50 "()"
+    elm - bench -f BenchZw.zw_map2 -f BenchZw.p2_map2 "()"
+
+    elm - bench -f BenchZw.zw_keep5 -f BenchZw.p2_keep5 "()"
+
+    elm - bench -f BenchZw.zw_map5 -f BenchZw.p2_map5 "()"
+
+    elm - bench -f BenchZw.zw_repeat_100 -f BenchZw.p2_repeat_100 "()"
+
+    elm - bench -f BenchZw.zw_loop_100 -f BenchZw.p2_loop_100 "()"
+
+    elm - bench -f BenchZw.zw_loop_1000 -f BenchZw.p2_loop_1000 "()"
+
+    elm - bench -f BenchZw.zw_andThen_5 -f BenchZw.p2_andThen_5 "()"
+
+    elm - bench -f BenchZw.zw_oneOf_first -f BenchZw.p2_oneOf_first "()"
+
+    elm - bench -f BenchZw.zw_oneOf_last -f BenchZw.p2_oneOf_last "()"
+
+    elm - bench -f BenchZw.zw_packet -f BenchZw.p2_packet "()"
+
+    elm - bench -f BenchZw.zw_message -f BenchZw.p2_message "()"
+
+    elm - bench -f BenchZw.zw_tagged50 -f BenchZw.p2_tagged50 "()"
 
 -}
 
@@ -333,9 +344,33 @@ zw_andThen_5 () =
 zwOneOfDecoder : ZW.Parser c String OneOfResult
 zwOneOfDecoder =
     ZW.oneOf
-        [ ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 0 then ZW.map Tag0 ZW.unsignedInt8 else ZW.fail "not 0")
-        , ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 1 then ZW.map2 Tag1 ZW.unsignedInt8 ZW.unsignedInt8 else ZW.fail "not 1")
-        , ZW.unsignedInt8 |> ZW.andThen (\t -> if t == 2 then ZW.map4 Tag2 ZW.unsignedInt8 ZW.unsignedInt8 ZW.unsignedInt8 ZW.unsignedInt8 else ZW.fail "not 2")
+        [ ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 0 then
+                        ZW.map Tag0 ZW.unsignedInt8
+
+                    else
+                        ZW.fail "not 0"
+                )
+        , ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 1 then
+                        ZW.map2 Tag1 ZW.unsignedInt8 ZW.unsignedInt8
+
+                    else
+                        ZW.fail "not 1"
+                )
+        , ZW.unsignedInt8
+            |> ZW.andThen
+                (\t ->
+                    if t == 2 then
+                        ZW.map4 Tag2 ZW.unsignedInt8 ZW.unsignedInt8 ZW.unsignedInt8 ZW.unsignedInt8
+
+                    else
+                        ZW.fail "not 2"
+                )
         ]
 
 
@@ -525,9 +560,33 @@ p2_andThen_5 () =
 p2OneOfDecoder : P2.Parser c String OneOfResult
 p2OneOfDecoder =
     P2.oneOf
-        [ P2.unsignedInt8 |> P2.andThen (\t -> if t == 0 then P2.map Tag0 P2.unsignedInt8 else P2.fail "not 0")
-        , P2.unsignedInt8 |> P2.andThen (\t -> if t == 1 then P2.map2 Tag1 P2.unsignedInt8 P2.unsignedInt8 else P2.fail "not 1")
-        , P2.unsignedInt8 |> P2.andThen (\t -> if t == 2 then P2.map4 Tag2 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 else P2.fail "not 2")
+        [ P2.unsignedInt8
+            |> P2.andThen
+                (\t ->
+                    if t == 0 then
+                        P2.map Tag0 P2.unsignedInt8
+
+                    else
+                        P2.fail "not 0"
+                )
+        , P2.unsignedInt8
+            |> P2.andThen
+                (\t ->
+                    if t == 1 then
+                        P2.map2 Tag1 P2.unsignedInt8 P2.unsignedInt8
+
+                    else
+                        P2.fail "not 1"
+                )
+        , P2.unsignedInt8
+            |> P2.andThen
+                (\t ->
+                    if t == 2 then
+                        P2.map4 Tag2 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8
+
+                    else
+                        P2.fail "not 2"
+                )
         ]
 
 
@@ -717,9 +776,33 @@ p3_andThen_5 () =
 p3OneOfDecoder : P3.Parser c String OneOfResult
 p3OneOfDecoder =
     P3.oneOf
-        [ P3.unsignedInt8 |> P3.andThen (\t -> if t == 0 then P3.map Tag0 P3.unsignedInt8 else P3.fail "not 0")
-        , P3.unsignedInt8 |> P3.andThen (\t -> if t == 1 then P3.map2 Tag1 P3.unsignedInt8 P3.unsignedInt8 else P3.fail "not 1")
-        , P3.unsignedInt8 |> P3.andThen (\t -> if t == 2 then P3.map4 Tag2 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8 else P3.fail "not 2")
+        [ P3.unsignedInt8
+            |> P3.andThen
+                (\t ->
+                    if t == 0 then
+                        P3.map Tag0 P3.unsignedInt8
+
+                    else
+                        P3.fail "not 0"
+                )
+        , P3.unsignedInt8
+            |> P3.andThen
+                (\t ->
+                    if t == 1 then
+                        P3.map2 Tag1 P3.unsignedInt8 P3.unsignedInt8
+
+                    else
+                        P3.fail "not 1"
+                )
+        , P3.unsignedInt8
+            |> P3.andThen
+                (\t ->
+                    if t == 2 then
+                        P3.map4 Tag2 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8
+
+                    else
+                        P3.fail "not 2"
+                )
         ]
 
 
