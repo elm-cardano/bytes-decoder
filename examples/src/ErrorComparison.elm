@@ -6,7 +6,7 @@ approaches, across a variety of failure scenarios.
 Build with:
 
     cd examples
-    elm make src/ErrorComparison.elm --output=error-comparison.html
+    elm reactor
 
 -}
 
@@ -326,7 +326,7 @@ rawTagDispatch tag =
             D.fail
 
 
-bdTagDispatch : Int -> BD.Decoder String String
+bdTagDispatch : Int -> BD.Decoder c String String
 bdTagDispatch tag =
     case tag of
         0 ->
@@ -365,7 +365,7 @@ brTagDispatch tag =
             BR.fail
 
 
-bdTagOneOf : BD.Decoder String Int
+bdTagOneOf : BD.Decoder c String Int
 bdTagOneOf =
     BD.oneOf
         [ BD.unsignedInt8 |> BD.andThen (\t -> if t == 0 then BD.unsignedInt8 else BD.fail ("tag " ++ String.fromInt t ++ " /= 0"))
@@ -427,7 +427,7 @@ showMaybe m =
             "Nothing\n  (no offset, no error message, no context)"
 
 
-showBdResult : Result (BD.Error e) a -> String
+showBdResult : Result (BD.Error c e) a -> String
 showBdResult r =
     case r of
         Ok v ->
@@ -437,28 +437,28 @@ showBdResult r =
             showBdError 0 e
 
 
-showBdError : Int -> BD.Error e -> String
+showBdError : Int -> BD.Error c e -> String
 showBdError indent err =
     let
         pad =
             String.repeat (indent * 2) " "
     in
     case err of
-        BD.OutOfBounds { offset, bytesNeeded } ->
-            pad ++ "OutOfBounds { offset = " ++ String.fromInt offset ++ ", bytesNeeded = " ++ String.fromInt bytesNeeded ++ " }"
+        BD.OutOfBounds { at, bytes } ->
+            pad ++ "OutOfBounds { at = " ++ String.fromInt at ++ ", bytes = " ++ String.fromInt bytes ++ " }"
 
-        BD.CustomError offset e ->
-            pad ++ "CustomError (offset " ++ String.fromInt offset ++ ") " ++ Debug.toString e
+        BD.Custom { at } e ->
+            pad ++ "Custom (at " ++ String.fromInt at ++ ") " ++ Debug.toString e
 
-        BD.OneOfErrors offset errors ->
+        BD.BadOneOf { at } errors ->
             pad
-                ++ "OneOfErrors (offset "
-                ++ String.fromInt offset
+                ++ "BadOneOf (at "
+                ++ String.fromInt at
                 ++ "):\n"
                 ++ String.join "\n" (List.indexedMap (\i e -> pad ++ "  [" ++ String.fromInt (i + 1) ++ "] " ++ showBdError 0 e) errors)
 
-        BD.InContext label inner ->
-            pad ++ "InContext \"" ++ label ++ "\":\n" ++ showBdError (indent + 1) inner
+        BD.InContext { label, start } inner ->
+            pad ++ "InContext { label = " ++ Debug.toString label ++ ", start = " ++ String.fromInt start ++ " }:\n" ++ showBdError (indent + 1) inner
 
 
 showZwResult : Result (ZW.Error c e) a -> String

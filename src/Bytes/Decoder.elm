@@ -1,48 +1,84 @@
 module Bytes.Decoder exposing
-    ( Decoder
-    , Error(..)
-    , decode
-    , unsignedInt8, unsignedInt16, unsignedInt32
-    , signedInt8, signedInt16, signedInt32
+    ( Decoder, decode, Error(..)
+    , succeed, fail, inContext
+    , unsignedInt8, unsignedInt16, unsignedInt32, signedInt8, signedInt16, signedInt32
     , float32, float64
-    , bytes, string
-    , succeed, fail
+    , string
+    , bytes
     , map, map2, map3, map4, map5
-    , andThen
     , keep, ignore, skip
-    , oneOf
-    , Step(..), loop, repeat
-    , mapError, inContext
-    , offsetAt
+    , andThen, oneOf, repeat, Step(..), loop
     )
 
 {-| Fast bytes decoder with error reporting and `oneOf` branching.
 
-Uses a dual-path architecture:
 
-  - **Fast path**: raw `elm/bytes` decoder composition for purely applicative
-    chains (`map2`–`map5`, `keep`, `ignore`, `repeat`). At the top-level
-    `decode` call, this is zero overhead vs raw `elm/bytes`.
-  - **Slow path**: state-passing function with per-primitive skip-to-offset.
-    Used for `andThen`, `oneOf`, `loop`, and as fallback for error reporting.
+# Architecture
+
+Each `Decoder` carries two execution strategies:
+
+1.  **Fast path** — a raw `elm/bytes` `Bytes.Decode.Decoder` composed via
+    `Decode.map2`, `Decode.andThen`, `Decode.loop`, etc. When present, `decode`
+    executes a single `Decode.decode` call with zero per-step overhead. This
+    matches the performance of hand-written `elm/bytes` decoders.
+
+2.  **Slow path** — a state-passing function that tracks byte offsets, reports
+    structured errors, and supports backtracking in `oneOf`. This path is only
+    executed when the fast path is unavailable or returns `Nothing` (i.e. an
+    error occurred).
+
+The key insight is that most decoders succeed on well-formed input. By deferring
+error tracking to a re-decode, the happy path pays no cost for error reporting.
+
+
+# Fast-path availability
+
+Not every combinator can be expressed as a raw `Bytes.Decode.Decoder`:
+
+  - **Always fast**: `succeed`, `map`, `map2`–`map5`, `keep`, `ignore`, `skip`,
+    `andThen`, `loop`, `repeat`, and all primitives.
+  - **Always slow**: `fail` (no decoder can produce a value), `oneOf`
+    (requires backtracking which `Bytes.Decode.Decoder` cannot do mid-stream).
+  - **Conditionally fast**: `andThen` and `loop` remain fast as long as the
+    callback returns a decoder with a fast path. If a callback branch returns
+    `fail`, that branch uses `Decode.fail` to signal the raw decoder, which causes
+    `Decode.decode` to return `Nothing` and triggers the slow re-decode.
+
+In practice, `fail` branches inside `andThen` are error-handling code that only
+runs on malformed input — exactly when we want to re-decode with error tracking.
 
 
 # Running
 
-@docs Decoder, Error, decode
-
-
-# Primitives
-
-@docs unsignedInt8, unsignedInt16, unsignedInt32
-@docs signedInt8, signedInt16, signedInt32
-@docs float32, float64
-@docs bytes, string
+@docs Decoder, decode, Error
 
 
 # Static
 
-@docs succeed, fail
+@docs succeed, fail, inContext
+
+
+# Primitives
+
+
+## Integers
+
+@docs unsignedInt8, unsignedInt16, unsignedInt32, signedInt8, signedInt16, signedInt32
+
+
+## Floats
+
+@docs float32, float64
+
+
+## Strings
+
+@docs string
+
+
+## Bytes
+
+@docs bytes
 
 
 # Mapping
@@ -50,40 +86,19 @@ Uses a dual-path architecture:
 @docs map, map2, map3, map4, map5
 
 
-# Chaining
-
-@docs andThen
-
-
 # Pipeline
 
 @docs keep, ignore, skip
 
 
-# Branching
+# Chaining
 
-@docs oneOf
-
-
-# Looping
-
-@docs Step, loop, repeat
-
-
-# Errors
-
-@docs mapError, inContext
-
-
-# Query
-
-@docs offsetAt
+@docs andThen, oneOf, repeat, Step, loop
 
 -}
 
-import Bytes exposing (Bytes, Endianness)
-import Bytes.Decode as D
-import Bytes.Encode as E
+import Bytes exposing (Bytes)
+import Bytes.Decode as Decode
 
 
 
@@ -92,370 +107,361 @@ import Bytes.Encode as E
 
 {-| A decoder that reads binary data and produces either a value or an error.
 
-Internally, decoders may carry a fast-path raw `elm/bytes` decoder for
-applicative composition, or just a slow-path function with error tracking.
--}
-type Decoder error value
-    = Fast (D.Decoder value) Int (Bytes -> Int -> Result (Error error) ( Int, value ))
-    | Slow (Bytes -> Int -> Result (Error error) ( Int, value ))
-
-
-{-| Errors that can occur during decoding.
-
-  - `OutOfBounds` — tried to read past the end of input.
-  - `CustomError` — user-defined error at a given byte offset.
-  - `OneOfErrors` — all alternatives in a `oneOf` failed; collects each error.
-  - `InContext` — wraps an inner error with a context label.
+Internally, it carries an optional raw `Bytes.Decode.Decoder` (fast path) and a
+state-passing function (slow path for error reporting).
 
 -}
-type Error error
-    = OutOfBounds { offset : Int, bytesNeeded : Int }
-    | CustomError Int error
-    | OneOfErrors Int (List (Error error))
-    | InContext String (Error error)
+type Decoder context error value
+    = Decoder (Maybe (Decode.Decoder value)) (State -> DecodeResult context error value)
 
 
-{-| A loop step: either continue with new state or finish with a value.
+type DecodeResult context error value
+    = Good value State
+    | Bad (Error context error)
+
+
+{-| Describes errors that arise while decoding.
+
+Custom errors happen through [`fail`](#fail), context tracking happens through
+[`inContext`](#inContext).
+
 -}
-type Step state a
-    = Loop state
-    | Done a
+type Error context error
+    = InContext { label : context, start : Int } (Error context error)
+    | OutOfBounds { at : Int, bytes : Int }
+    | Custom { at : Int } error
+    | BadOneOf { at : Int } (List (Error context error))
+
+
+type alias State =
+    { offset : Int
+    , input : Bytes
+    }
 
 
 
 -- RUNNING
 
 
-{-| Run a decoder on some bytes.
+{-| Run the given decoder on the provided bytes.
 
-For purely applicative decoders (built only with `map2`–`map5`, `keep`,
-`ignore`, `repeat` over primitives), this takes the fast path — a single
-`elm/bytes` decode call with zero wrapper overhead.
-
-On failure, the slow path re-runs for detailed error info.
+First tries the fast path (a single `Decode.decode` call). If the fast path is
+unavailable or fails, re-decodes with the slow path to produce a detailed error.
 
 -}
-decode : Decoder error value -> Bytes -> Result (Error error) value
-decode decoder input =
-    case decoder of
-        Fast fast width slow ->
-            if width <= Bytes.width input then
-                case D.decode fast input of
-                    Just v ->
-                        Ok v
+decode :
+    Decoder context error value
+    -> Bytes
+    -> Result (Error context error) value
+decode (Decoder maybeDec slow) input =
+    case maybeDec of
+        Just dec ->
+            case Decode.decode dec input of
+                Just v ->
+                    Ok v
 
-                    Nothing ->
-                        slow input 0 |> Result.map Tuple.second
+                Nothing ->
+                    decodeSlow slow input
 
-            else
-                slow input 0 |> Result.map Tuple.second
-
-        Slow slow ->
-            slow input 0 |> Result.map Tuple.second
-
+        Nothing ->
+            decodeSlow slow input
 
 
--- PRIMITIVES
+decodeSlow : (State -> DecodeResult context error value) -> Bytes -> Result (Error context error) value
+decodeSlow slow input =
+    case slow { offset = 0, input = input } of
+        Good v _ ->
+            Ok v
 
-
-{-| Decode one byte as an unsigned integer from 0 to 255.
--}
-unsignedInt8 : Decoder error Int
-unsignedInt8 =
-    primitive D.unsignedInt8 1
-
-
-{-| Decode two bytes as an unsigned integer.
--}
-unsignedInt16 : Endianness -> Decoder error Int
-unsignedInt16 e =
-    primitive (D.unsignedInt16 e) 2
-
-
-{-| Decode four bytes as an unsigned integer.
--}
-unsignedInt32 : Endianness -> Decoder error Int
-unsignedInt32 e =
-    primitive (D.unsignedInt32 e) 4
-
-
-{-| Decode one byte as a signed integer from -128 to 127.
--}
-signedInt8 : Decoder error Int
-signedInt8 =
-    primitive D.signedInt8 1
-
-
-{-| Decode two bytes as a signed integer.
--}
-signedInt16 : Endianness -> Decoder error Int
-signedInt16 e =
-    primitive (D.signedInt16 e) 2
-
-
-{-| Decode four bytes as a signed integer.
--}
-signedInt32 : Endianness -> Decoder error Int
-signedInt32 e =
-    primitive (D.signedInt32 e) 4
-
-
-{-| Decode four bytes as a 32-bit float.
--}
-float32 : Endianness -> Decoder error Float
-float32 e =
-    primitive (D.float32 e) 4
-
-
-{-| Decode eight bytes as a 64-bit float.
--}
-float64 : Endianness -> Decoder error Float
-float64 e =
-    primitive (D.float64 e) 8
-
-
-{-| Decode exactly `n` bytes.
--}
-bytes : Int -> Decoder error Bytes
-bytes n =
-    primitive (D.bytes n) n
-
-
-{-| Decode exactly `n` bytes as a UTF-8 string.
--}
-string : Int -> Decoder error String
-string n =
-    primitive (D.string n) n
+        Bad e ->
+            Err e
 
 
 
 -- STATIC
 
 
-{-| A decoder that always succeeds with the given value, consuming zero bytes.
+{-| Always succeed with the given value, consuming no input.
 -}
-succeed : value -> Decoder error value
-succeed v =
-    Fast (D.succeed v) 0 (\_ offset -> Ok ( offset, v ))
+succeed : value -> Decoder context error value
+succeed val =
+    Decoder (Just (Decode.succeed val)) (Good val)
 
 
-{-| A decoder that always fails with the given error at the current offset.
+{-| Always fail with the given error.
+
+This decoder has no fast path — using it (even in a branch of `andThen`) will
+cause `decode` to fall back to the slow path for error reporting.
+
 -}
-fail : error -> Decoder error a
+fail : error -> Decoder context error value
 fail e =
-    Slow (\_ offset -> Err (CustomError offset e))
+    Decoder Nothing (\state -> Bad (Custom { at = state.offset } e))
+
+
+{-| Add context to errors that may occur during decoding.
+
+The fast path is preserved (context only matters on the error path).
+
+-}
+inContext :
+    context
+    -> Decoder context error value
+    -> Decoder context error value
+inContext label (Decoder maybeDec slow) =
+    Decoder maybeDec
+        (\state ->
+            case slow state of
+                Good v s ->
+                    Good v s
+
+                Bad e ->
+                    Bad
+                        (InContext
+                            { label = label
+                            , start = state.offset
+                            }
+                            e
+                        )
+        )
 
 
 
 -- MAPPING
 
 
-{-| Transform the value produced by a decoder.
+{-| Transform the value a decoder produces.
 -}
-map : (a -> b) -> Decoder error a -> Decoder error b
-map f decoder =
-    case decoder of
-        Fast fast width slow ->
-            Fast (D.map f fast) width (slowMap f slow)
+map :
+    (a -> b)
+    -> Decoder context error a
+    -> Decoder context error b
+map t (Decoder maybeDec slow) =
+    Decoder
+        (Maybe.map (Decode.map t) maybeDec)
+        (\state ->
+            case slow state of
+                Good v s ->
+                    Good (t v) s
 
-        Slow slow ->
-            Slow (slowMap f slow)
+                Bad e ->
+                    Bad e
+        )
 
 
-{-| Combine two sequential decoders.
-
-If both operands have a fast path, the result preserves it.
-
+{-| Combine what 2 decoders produce.
 -}
-map2 : (a -> b -> c) -> Decoder error a -> Decoder error b -> Decoder error c
-map2 f da db =
-    let
-        slow =
-            \input offset ->
-                case runAt da input offset of
-                    Err e ->
-                        Err e
+map2 :
+    (x -> y -> z)
+    -> Decoder context error x
+    -> Decoder context error y
+    -> Decoder context error z
+map2 f (Decoder maybeDecX slowX) (Decoder maybeDecY slowY) =
+    Decoder
+        (case ( maybeDecX, maybeDecY ) of
+            ( Just decX, Just decY ) ->
+                Just (Decode.map2 f decX decY)
 
-                    Ok ( o2, a_ ) ->
-                        case runAt db input o2 of
-                            Err e ->
-                                Err e
+            _ ->
+                Nothing
+        )
+        (\state ->
+            case slowX state of
+                Good x s1 ->
+                    case slowY s1 of
+                        Good y s2 ->
+                            Good (f x y) s2
 
-                            Ok ( o3, b_ ) ->
-                                Ok ( o3, f a_ b_ )
-    in
-    case ( da, db ) of
-        ( Fast fa wa _, Fast fb wb _ ) ->
-            Fast (D.map2 f fa fb) (wa + wb) slow
+                        Bad e ->
+                            Bad e
 
-        _ ->
-            Slow slow
+                Bad e ->
+                    Bad e
+        )
 
 
-{-| Combine three sequential decoders.
+{-| Combine what 3 decoders produce.
 -}
 map3 :
-    (a -> b -> c -> d)
-    -> Decoder error a
-    -> Decoder error b
-    -> Decoder error c
-    -> Decoder error d
-map3 f da db dc =
-    let
-        slow =
-            \input offset ->
-                case runAt da input offset of
-                    Err e ->
-                        Err e
+    (w -> x -> y -> z)
+    -> Decoder context error w
+    -> Decoder context error x
+    -> Decoder context error y
+    -> Decoder context error z
+map3 f (Decoder maybeDecW slowW) (Decoder maybeDecX slowX) (Decoder maybeDecY slowY) =
+    Decoder
+        (case ( maybeDecW, maybeDecX, maybeDecY ) of
+            ( Just decW, Just decX, Just decY ) ->
+                Just (Decode.map3 f decW decX decY)
 
-                    Ok ( o2, a_ ) ->
-                        case runAt db input o2 of
-                            Err e ->
-                                Err e
+            _ ->
+                Nothing
+        )
+        (\state ->
+            case slowW state of
+                Good w s1 ->
+                    case slowX s1 of
+                        Good x s2 ->
+                            case slowY s2 of
+                                Good y s3 ->
+                                    Good (f w x y) s3
 
-                            Ok ( o3, b_ ) ->
-                                case runAt dc input o3 of
-                                    Err e ->
-                                        Err e
+                                Bad e ->
+                                    Bad e
 
-                                    Ok ( o4, c_ ) ->
-                                        Ok ( o4, f a_ b_ c_ )
-    in
-    case ( da, db, dc ) of
-        ( Fast fa wa _, Fast fb wb _, Fast fc wc _ ) ->
-            Fast (D.map3 f fa fb fc) (wa + wb + wc) slow
+                        Bad e ->
+                            Bad e
 
-        _ ->
-            Slow slow
+                Bad e ->
+                    Bad e
+        )
 
 
-{-| Combine four sequential decoders.
+{-| Combine what 4 decoders produce.
 -}
 map4 :
-    (a -> b -> c -> d -> e)
-    -> Decoder error a
-    -> Decoder error b
-    -> Decoder error c
-    -> Decoder error d
-    -> Decoder error e
-map4 f da db dc dd =
-    let
-        slow =
-            \input offset ->
-                case runAt da input offset of
-                    Err e ->
-                        Err e
+    (v -> w -> x -> y -> z)
+    -> Decoder context error v
+    -> Decoder context error w
+    -> Decoder context error x
+    -> Decoder context error y
+    -> Decoder context error z
+map4 f (Decoder maybeDecV slowV) (Decoder maybeDecW slowW) (Decoder maybeDecX slowX) (Decoder maybeDecY slowY) =
+    Decoder
+        (case ( maybeDecV, maybeDecW ) of
+            ( Just decV, Just decW ) ->
+                case ( maybeDecX, maybeDecY ) of
+                    ( Just decX, Just decY ) ->
+                        Just (Decode.map4 f decV decW decX decY)
 
-                    Ok ( o2, a_ ) ->
-                        case runAt db input o2 of
-                            Err e ->
-                                Err e
+                    _ ->
+                        Nothing
 
-                            Ok ( o3, b_ ) ->
-                                case runAt dc input o3 of
-                                    Err e ->
-                                        Err e
+            _ ->
+                Nothing
+        )
+        (\state ->
+            case slowV state of
+                Good v s1 ->
+                    case slowW s1 of
+                        Good w s2 ->
+                            case slowX s2 of
+                                Good x s3 ->
+                                    case slowY s3 of
+                                        Good y s4 ->
+                                            Good (f v w x y) s4
 
-                                    Ok ( o4, c_ ) ->
-                                        case runAt dd input o4 of
-                                            Err e ->
-                                                Err e
+                                        Bad e ->
+                                            Bad e
 
-                                            Ok ( o5, d_ ) ->
-                                                Ok ( o5, f a_ b_ c_ d_ )
-    in
-    case ( da, db ) of
-        ( Fast fa wa _, Fast fb wb _ ) ->
-            case ( dc, dd ) of
-                ( Fast fc wc _, Fast fd wd _ ) ->
-                    Fast (D.map4 f fa fb fc fd) (wa + wb + wc + wd) slow
+                                Bad e ->
+                                    Bad e
 
-                _ ->
-                    Slow slow
+                        Bad e ->
+                            Bad e
 
-        _ ->
-            Slow slow
+                Bad e ->
+                    Bad e
+        )
 
 
-{-| Combine five sequential decoders.
+{-| Combine what 5 decoders produce.
 -}
 map5 :
-    (a -> b -> c -> d -> e -> f)
-    -> Decoder error a
-    -> Decoder error b
-    -> Decoder error c
-    -> Decoder error d
-    -> Decoder error e
-    -> Decoder error f
-map5 f da db dc dd de =
-    let
-        slow =
-            \input offset ->
-                case runAt da input offset of
-                    Err e ->
-                        Err e
+    (u -> v -> w -> x -> y -> z)
+    -> Decoder context error u
+    -> Decoder context error v
+    -> Decoder context error w
+    -> Decoder context error x
+    -> Decoder context error y
+    -> Decoder context error z
+map5 f (Decoder maybeDecU slowU) (Decoder maybeDecV slowV) (Decoder maybeDecW slowW) (Decoder maybeDecX slowX) (Decoder maybeDecY slowY) =
+    Decoder
+        (case ( maybeDecU, maybeDecV ) of
+            ( Just decU, Just decV ) ->
+                case ( maybeDecW, maybeDecX, maybeDecY ) of
+                    ( Just decW, Just decX, Just decY ) ->
+                        Just (Decode.map5 f decU decV decW decX decY)
 
-                    Ok ( o2, a_ ) ->
-                        case runAt db input o2 of
-                            Err e ->
-                                Err e
+                    _ ->
+                        Nothing
 
-                            Ok ( o3, b_ ) ->
-                                case runAt dc input o3 of
-                                    Err e ->
-                                        Err e
+            _ ->
+                Nothing
+        )
+        (\state ->
+            case slowU state of
+                Good u s1 ->
+                    case slowV s1 of
+                        Good v s2 ->
+                            case slowW s2 of
+                                Good w s3 ->
+                                    case slowX s3 of
+                                        Good x s4 ->
+                                            case slowY s4 of
+                                                Good y s5 ->
+                                                    Good (f u v w x y) s5
 
-                                    Ok ( o4, c_ ) ->
-                                        case runAt dd input o4 of
-                                            Err e ->
-                                                Err e
+                                                Bad e ->
+                                                    Bad e
 
-                                            Ok ( o5, d_ ) ->
-                                                case runAt de input o5 of
-                                                    Err e ->
-                                                        Err e
+                                        Bad e ->
+                                            Bad e
 
-                                                    Ok ( o6, e_ ) ->
-                                                        Ok ( o6, f a_ b_ c_ d_ e_ )
-    in
-    case ( da, db ) of
-        ( Fast fa wa _, Fast fb wb _ ) ->
-            case ( dc, dd ) of
-                ( Fast fc wc _, Fast fd wd _ ) ->
-                    case de of
-                        Fast fe we _ ->
-                            Fast (D.map5 f fa fb fc fd fe) (wa + wb + wc + wd + we) slow
+                                Bad e ->
+                                    Bad e
 
-                        _ ->
-                            Slow slow
+                        Bad e ->
+                            Bad e
 
-                _ ->
-                    Slow slow
-
-        _ ->
-            Slow slow
+                Bad e ->
+                    Bad e
+        )
 
 
 
 -- CHAINING
 
 
-{-| Create a decoder whose next step depends on a previously decoded value.
+{-| Decode one thing, then decode another thing based on the result.
 
-**Note:** `andThen` always uses the slow path. Prefer `map2`–`map5` or
-`keep`/`ignore` when the decoding structure is known statically.
+The fast path uses `Decode.andThen`. If the callback returns a decoder without
+a fast path (e.g. via `fail`), the fast decoder signals failure via
+`Decode.fail`, causing `decode` to fall back to the slow path.
 
 -}
-andThen : (a -> Decoder error b) -> Decoder error a -> Decoder error b
-andThen callback da =
-    Slow
-        (\input offset ->
-            case runAt da input offset of
-                Err e ->
-                    Err e
+andThen :
+    (a -> Decoder context error b)
+    -> Decoder context error a
+    -> Decoder context error b
+andThen toNext (Decoder maybeDecA slowA) =
+    Decoder
+        (Maybe.map
+            (\decA ->
+                Decode.andThen
+                    (\a ->
+                        case toNext a of
+                            Decoder (Just decB) _ ->
+                                decB
 
-                Ok ( newOffset, a_ ) ->
-                    runAt (callback a_) input newOffset
+                            Decoder Nothing _ ->
+                                Decode.fail
+                    )
+                    decA
+            )
+            maybeDecA
+        )
+        (\state ->
+            case slowA state of
+                Good a s ->
+                    let
+                        (Decoder _ slowB) =
+                            toNext a
+                    in
+                    slowB s
+
+                Bad e ->
+                    Bad e
         )
 
 
@@ -465,36 +471,80 @@ andThen callback da =
 
 {-| Decode a value and apply it to the function held by the previous decoder.
 
-    import Bytes exposing (Endianness(..))
     import Bytes.Decoder as BD
 
-    type alias Point =
-        { x : Float, y : Float }
-
-    pointDecoder : BD.Decoder error Point
-    pointDecoder =
-        BD.succeed Point
-            |> BD.keep (BD.float32 BE)
-            |> BD.keep (BD.float32 BE)
+    BD.succeed Record
+        |> BD.keep BD.unsignedInt8
+        |> BD.keep BD.unsignedInt8
+        |> BD.keep BD.unsignedInt8
 
 -}
-keep : Decoder error a -> Decoder error (a -> b) -> Decoder error b
-keep da df =
-    map2 (\g a_ -> g a_) df da
+keep :
+    Decoder context error a
+    -> Decoder context error (a -> b)
+    -> Decoder context error b
+keep (Decoder maybeDecVal slowVal) (Decoder maybeDecFun slowFun) =
+    Decoder
+        (case ( maybeDecFun, maybeDecVal ) of
+            ( Just decFun, Just decVal ) ->
+                Just (Decode.map2 (\g a -> g a) decFun decVal)
+
+            _ ->
+                Nothing
+        )
+        (\state ->
+            case slowFun state of
+                Good g s1 ->
+                    case slowVal s1 of
+                        Good a s2 ->
+                            Good (g a) s2
+
+                        Bad e ->
+                            Bad e
+
+                Bad e ->
+                    Bad e
+        )
 
 
 {-| Run a decoder but discard its result, keeping the previous value.
+
+The ignored decoder must still succeed for the pipeline to succeed.
+
 -}
-ignore : Decoder error x -> Decoder error a -> Decoder error a
-ignore dx da =
-    map2 (\a_ _ -> a_) da dx
+ignore :
+    Decoder context error ignore
+    -> Decoder context error keep
+    -> Decoder context error keep
+ignore (Decoder maybeDecSkip slowSkip) (Decoder maybeDecKeep slowKeep) =
+    Decoder
+        (case ( maybeDecKeep, maybeDecSkip ) of
+            ( Just decKeep, Just decSkip ) ->
+                Just (Decode.map2 (\k _ -> k) decKeep decSkip)
+
+            _ ->
+                Nothing
+        )
+        (\state ->
+            case slowKeep state of
+                Good k s1 ->
+                    case slowSkip s1 of
+                        Good _ s2 ->
+                            Good k s2
+
+                        Bad e ->
+                            Bad e
+
+                Bad e ->
+                    Bad e
+        )
 
 
 {-| Skip `n` bytes, then continue with the given decoder.
 -}
-skip : Int -> Decoder error a -> Decoder error a
-skip n da =
-    map2 (\_ a_ -> a_) (bytes n) da
+skip : Int -> Decoder context error value -> Decoder context error value
+skip nBytes decoder =
+    map2 (\_ v -> v) (bytes nBytes) decoder
 
 
 
@@ -503,326 +553,249 @@ skip n da =
 
 {-| Try each decoder in order, returning the first success.
 
-For alternatives with a fast path, `oneOf` tries the fast `elm/bytes` decoder
-on a pre-sliced input — one byte-slice shared across all alternatives — avoiding
-per-primitive skip-to-offset overhead.
+This decoder has no fast path — it always uses the slow path with backtracking.
+For tag-based dispatch, prefer `andThen` which preserves the fast path.
 
 Collects all errors on failure for diagnostic purposes.
 
 -}
-oneOf : List (Decoder error value) -> Decoder error value
+oneOf : List (Decoder context error value) -> Decoder context error value
 oneOf options =
-    Slow
-        (\input offset ->
-            let
-                sliced =
-                    sliceFrom offset input
-            in
-            oneOfHelper sliced input offset options []
-        )
+    Decoder Nothing (oneOfHelp options [])
+
+
+oneOfHelp :
+    List (Decoder context error value)
+    -> List (Error context error)
+    -> State
+    -> DecodeResult context error value
+oneOfHelp options errors state =
+    case options of
+        [] ->
+            Bad (BadOneOf { at = state.offset } (List.reverse errors))
+
+        (Decoder _ slow) :: xs ->
+            case slow state of
+                Good v s ->
+                    Good v s
+
+                Bad e ->
+                    oneOfHelp xs (e :: errors) state
 
 
 
 -- LOOPING
 
 
+{-| Represent the next step of a loop: either continue with updated state,
+or finish with a final value.
+-}
+type Step state a
+    = Loop state
+    | Done a
+
+
 {-| Decode in a loop. Each iteration produces either `Loop` (continue with new
 state) or `Done` (finish with a value).
+
+The fast path uses `Decode.loop` (a tight `while` loop in the JS kernel).
+If any iteration's callback returns a decoder without a fast path, the fast
+decoder signals failure via `Decode.fail` and `decode` falls back to the slow
+path.
+
 -}
-loop : state -> (state -> Decoder error (Step state a)) -> Decoder error a
-loop init step =
-    Slow (\input offset -> loopHelper init step input offset)
+loop :
+    (state -> Decoder context error (Step state a))
+    -> state
+    -> Decoder context error a
+loop toNext initialState =
+    Decoder
+        (Just (loopFast toNext initialState))
+        (loopHelp initialState toNext)
+
+
+loopFast :
+    (state -> Decoder context error (Step state a))
+    -> state
+    -> Decode.Decoder a
+loopFast toNext initial =
+    Decode.loop initial
+        (\loopState ->
+            case toNext loopState of
+                Decoder (Just dec) _ ->
+                    Decode.map
+                        (\step ->
+                            case step of
+                                Loop s ->
+                                    Decode.Loop s
+
+                                Done a ->
+                                    Decode.Done a
+                        )
+                        dec
+
+                Decoder Nothing _ ->
+                    Decode.fail
+        )
+
+
+loopHelp :
+    state
+    -> (state -> Decoder context error (Step state a))
+    -> State
+    -> DecodeResult context error a
+loopHelp loopState toNext state =
+    let
+        (Decoder _ slow) =
+            toNext loopState
+    in
+    case slow state of
+        Good (Loop newLoopState) newState ->
+            loopHelp newLoopState toNext newState
+
+        Good (Done v) newState ->
+            Good v newState
+
+        Bad e ->
+            Bad e
 
 
 {-| Decode exactly `count` copies of the same decoder into a list.
 
 If the inner decoder has a fast path, `repeat` preserves it by composing
-a single `elm/bytes` loop decoder.
+a single `Decode.loop` decoder.
 
 -}
-repeat : Decoder error value -> Int -> Decoder error (List value)
-repeat decoder count =
-    if count <= 0 then
-        succeed []
-
-    else
-        let
-            slow =
-                \input offset ->
-                    repeatHelper decoder count input offset []
-        in
-        case decoder of
-            Fast fast width _ ->
-                Fast
-                    (D.loop ( count, [] )
-                        (\( remaining, acc ) ->
-                            if remaining <= 0 then
-                                D.succeed (D.Done (List.reverse acc))
-
-                            else
-                                D.map (\v -> D.Loop ( remaining - 1, v :: acc )) fast
-                        )
-                    )
-                    (width * count)
-                    slow
-
-            _ ->
-                Slow slow
+repeat : Decoder context error value -> Int -> Decoder context error (List value)
+repeat (Decoder maybeDec slow) nTimes =
+    Decoder
+        (Maybe.map (\dec -> repeatFast dec nTimes) maybeDec)
+        (repeatHelp slow nTimes [])
 
 
-
--- ERRORS
-
-
-{-| Transform the error type.
--}
-mapError : (e1 -> e2) -> Decoder e1 a -> Decoder e2 a
-mapError f decoder =
-    case decoder of
-        Fast fast width slow ->
-            Fast fast width (\input offset -> slow input offset |> Result.mapError (transformError f))
-
-        Slow slow ->
-            Slow (\input offset -> slow input offset |> Result.mapError (transformError f))
-
-
-{-| Add context to errors. On the fast (success) path, this is free.
--}
-inContext : String -> Decoder error value -> Decoder error value
-inContext label decoder =
-    case decoder of
-        Fast fast width slow ->
-            Fast fast width (wrapContext label slow)
-
-        Slow slow ->
-            Slow (wrapContext label slow)
-
-
-{-| Get the current byte offset without consuming any bytes.
-
-**Note:** this disables the fast path for any composition that includes it.
-
--}
-offsetAt : Decoder error Int
-offsetAt =
-    Slow (\_ offset -> Ok ( offset, offset ))
-
-
-
--- INTERNAL: primitive construction
-
-
-primitive : D.Decoder a -> Int -> Decoder error a
-primitive decoder byteWidth =
-    Fast decoder byteWidth
-        (\input offset ->
-            if offset + byteWidth > Bytes.width input then
-                Err (OutOfBounds { offset = offset, bytesNeeded = byteWidth })
+repeatFast : Decode.Decoder value -> Int -> Decode.Decoder (List value)
+repeatFast dec nTimes =
+    Decode.loop ( nTimes, [] )
+        (\( remaining, acc ) ->
+            if remaining <= 0 then
+                Decode.succeed (Decode.Done (List.reverse acc))
 
             else
-                case D.decode (skipThen offset decoder) input of
-                    Just v ->
-                        Ok ( offset + byteWidth, v )
-
-                    Nothing ->
-                        Err (OutOfBounds { offset = offset, bytesNeeded = byteWidth })
+                Decode.map (\v -> Decode.Loop ( remaining - 1, v :: acc )) dec
         )
 
 
-skipThen : Int -> D.Decoder a -> D.Decoder a
-skipThen offset decoder =
-    if offset == 0 then
-        decoder
-
-    else
-        D.bytes offset |> D.andThen (\_ -> decoder)
-
-
-
--- INTERNAL: running decoders
-
-
-{-| Run a decoder's slow path at a given offset.
-Used for sequential composition in andThen, map2, etc.
--}
-runAt : Decoder error value -> Bytes -> Int -> Result (Error error) ( Int, value )
-runAt decoder input offset =
-    case decoder of
-        Fast _ _ slow ->
-            slow input offset
-
-        Slow slow ->
-            slow input offset
-
-
-
--- INTERNAL: oneOf helpers
-
-
-oneOfHelper :
-    Bytes
-    -> Bytes
-    -> Int
-    -> List (Decoder error value)
-    -> List (Error error)
-    -> Result (Error error) ( Int, value )
-oneOfHelper sliced originalInput offset options errors =
-    case options of
-        [] ->
-            Err (OneOfErrors offset (List.reverse errors))
-
-        d :: rest ->
-            case oneOfTry sliced d originalInput offset of
-                Ok result ->
-                    Ok result
-
-                Err e ->
-                    oneOfHelper sliced originalInput offset rest (e :: errors)
-
-
-{-| Try a decoder in a oneOf context. For Fast decoders, try the fast path
-on the pre-sliced input first (avoids per-primitive skip overhead).
--}
-oneOfTry :
-    Bytes
-    -> Decoder error value
-    -> Bytes
-    -> Int
-    -> Result (Error error) ( Int, value )
-oneOfTry sliced decoder originalInput offset =
-    case decoder of
-        Fast fast width slow ->
-            if width <= Bytes.width sliced then
-                case D.decode fast sliced of
-                    Just v ->
-                        Ok ( offset + width, v )
-
-                    Nothing ->
-                        slow originalInput offset
-
-            else
-                slow originalInput offset
-
-        Slow slow ->
-            slow originalInput offset
-
-
-sliceFrom : Int -> Bytes -> Bytes
-sliceFrom offset input =
-    if offset <= 0 then
-        input
-
-    else
-        let
-            remaining =
-                Bytes.width input - offset
-        in
-        if remaining <= 0 then
-            emptyBytes
-
-        else
-            case D.decode (D.bytes offset |> D.andThen (\_ -> D.bytes remaining)) input of
-                Just sliced ->
-                    sliced
-
-                Nothing ->
-                    emptyBytes
-
-
-emptyBytes : Bytes
-emptyBytes =
-    E.encode (E.sequence [])
-
-
-
--- INTERNAL: loop helpers
-
-
-loopHelper :
-    state
-    -> (state -> Decoder error (Step state a))
-    -> Bytes
-    -> Int
-    -> Result (Error error) ( Int, a )
-loopHelper state step input offset =
-    case runAt (step state) input offset of
-        Err e ->
-            Err e
-
-        Ok ( newOffset, stepResult ) ->
-            case stepResult of
-                Loop newState ->
-                    loopHelper newState step input newOffset
-
-                Done a_ ->
-                    Ok ( newOffset, a_ )
-
-
-repeatHelper :
-    Decoder error value
-    -> Int
-    -> Bytes
+repeatHelp :
+    (State -> DecodeResult context error value)
     -> Int
     -> List value
-    -> Result (Error error) ( Int, List value )
-repeatHelper decoder remaining input offset acc =
+    -> State
+    -> DecodeResult context error (List value)
+repeatHelp slow remaining acc state =
     if remaining <= 0 then
-        Ok ( offset, List.reverse acc )
+        Good (List.reverse acc) state
 
     else
-        case runAt decoder input offset of
-            Err e ->
-                Err e
+        case slow state of
+            Good v newState ->
+                repeatHelp slow (remaining - 1) (v :: acc) newState
 
-            Ok ( newOffset, v ) ->
-                repeatHelper decoder (remaining - 1) input newOffset (v :: acc)
-
-
-
--- INTERNAL: error helpers
+            Bad e ->
+                Bad e
 
 
-slowMap :
-    (a -> b)
-    -> (Bytes -> Int -> Result (Error error) ( Int, a ))
-    -> Bytes
-    -> Int
-    -> Result (Error error) ( Int, b )
-slowMap f slow input offset =
-    case slow input offset of
-        Ok ( o, a_ ) ->
-            Ok ( o, f a_ )
 
-        Err e ->
-            Err e
+-- PRIMITIVES
 
 
-wrapContext :
-    String
-    -> (Bytes -> Int -> Result (Error error) ( Int, value ))
-    -> Bytes
-    -> Int
-    -> Result (Error error) ( Int, value )
-wrapContext label slow input offset =
-    case slow input offset of
-        Ok result ->
-            Ok result
-
-        Err e ->
-            Err (InContext label e)
+{-| Decode one byte as an unsigned integer from 0 to 255.
+-}
+unsignedInt8 : Decoder context error Int
+unsignedInt8 =
+    fromDecoder Decode.unsignedInt8 1
 
 
-transformError : (e1 -> e2) -> Error e1 -> Error e2
-transformError f error =
-    case error of
-        OutOfBounds info ->
-            OutOfBounds info
+{-| Decode one byte as a signed integer from -128 to 127.
+-}
+signedInt8 : Decoder context error Int
+signedInt8 =
+    fromDecoder Decode.signedInt8 1
 
-        CustomError offset e ->
-            CustomError offset (f e)
 
-        OneOfErrors offset errors ->
-            OneOfErrors offset (List.map (transformError f) errors)
+{-| Decode two bytes as an unsigned integer from 0 to 65535.
+-}
+unsignedInt16 : Bytes.Endianness -> Decoder context error Int
+unsignedInt16 bo =
+    fromDecoder (Decode.unsignedInt16 bo) 2
 
-        InContext label inner ->
-            InContext label (transformError f inner)
+
+{-| Decode two bytes as a signed integer from -32768 to 32767.
+-}
+signedInt16 : Bytes.Endianness -> Decoder context error Int
+signedInt16 bo =
+    fromDecoder (Decode.signedInt16 bo) 2
+
+
+{-| Decode four bytes as an unsigned integer from 0 to 4294967295.
+-}
+unsignedInt32 : Bytes.Endianness -> Decoder context error Int
+unsignedInt32 bo =
+    fromDecoder (Decode.unsignedInt32 bo) 4
+
+
+{-| Decode four bytes as a signed integer from -2147483648 to 2147483647.
+-}
+signedInt32 : Bytes.Endianness -> Decoder context error Int
+signedInt32 bo =
+    fromDecoder (Decode.signedInt32 bo) 4
+
+
+{-| Decode four bytes as a 32-bit float.
+-}
+float32 : Bytes.Endianness -> Decoder context error Float
+float32 bo =
+    fromDecoder (Decode.float32 bo) 4
+
+
+{-| Decode eight bytes as a 64-bit float.
+-}
+float64 : Bytes.Endianness -> Decoder context error Float
+float64 bo =
+    fromDecoder (Decode.float64 bo) 8
+
+
+{-| Decode exactly `n` bytes.
+-}
+bytes : Int -> Decoder context error Bytes
+bytes count =
+    fromDecoder (Decode.bytes count) count
+
+
+{-| Decode exactly `n` bytes as a UTF-8 string.
+-}
+string : Int -> Decoder context error String
+string byteCount =
+    fromDecoder (Decode.string byteCount) byteCount
+
+
+
+-- INTERNAL
+
+
+fromDecoder : Decode.Decoder v -> Int -> Decoder context error v
+fromDecoder dec byteLength =
+    Decoder
+        (Just dec)
+        (\state ->
+            let
+                combined : Decode.Decoder v
+                combined =
+                    Decode.map2 (\_ v -> v) (Decode.bytes state.offset) dec
+            in
+            case Decode.decode combined state.input of
+                Just res ->
+                    Good res { offset = state.offset + byteLength, input = state.input }
+
+                Nothing ->
+                    Bad (OutOfBounds { at = state.offset, bytes = byteLength })
+        )

@@ -82,7 +82,7 @@ primitiveTests =
             , test "fails on empty input" <|
                 \_ ->
                     BD.decode BD.unsignedInt8 empty
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 1 }))
             ]
         , describe "signedInt8"
             [ test "decodes positive" <|
@@ -110,7 +110,7 @@ primitiveTests =
             , test "fails on 1 byte" <|
                 \_ ->
                     BD.decode (BD.unsignedInt16 BE) (fromList [ 0x01 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 2 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 2 }))
             ]
         , describe "signedInt16"
             [ test "decodes negative BE" <|
@@ -126,7 +126,7 @@ primitiveTests =
             , test "fails on 3 bytes" <|
                 \_ ->
                     BD.decode (BD.unsignedInt32 BE) (fromList [ 0, 0, 1 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 4 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 4 }))
             ]
         , describe "signedInt32"
             [ test "decodes negative BE" <|
@@ -164,7 +164,7 @@ primitiveTests =
             , test "fails when not enough bytes" <|
                 \_ ->
                     BD.decode (BD.bytes 5) (fromList [ 1, 2, 3 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 5 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 5 }))
             ]
         , describe "string"
             [ test "decodes ASCII" <|
@@ -189,7 +189,7 @@ primitiveTests =
             , test "fails when too short" <|
                 \_ ->
                     BD.decode (BD.string 10) (fromList [ 0x41 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 10 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 10 }))
             ]
         ]
 
@@ -209,14 +209,14 @@ staticTests =
             \_ ->
                 BD.decode (BD.succeed "hello") (fromList [ 1, 2, 3 ])
                     |> Expect.equal (Ok "hello")
-        , test "fail returns CustomError at offset 0" <|
+        , test "fail returns Custom error at offset 0" <|
             \_ ->
                 BD.decode (BD.fail "oops") empty
-                    |> Expect.equal (Err (CustomError 0 "oops"))
-        , test "fail returns CustomError even with input" <|
+                    |> Expect.equal (Err (Custom { at = 0 } "oops"))
+        , test "fail returns Custom error even with input" <|
             \_ ->
                 BD.decode (BD.fail "oops") (fromList [ 1, 2, 3 ])
-                    |> Expect.equal (Err (CustomError 0 "oops"))
+                    |> Expect.equal (Err (Custom { at = 0 } "oops"))
         ]
 
 
@@ -235,7 +235,7 @@ mappingTests =
             , test "propagates error" <|
                 \_ ->
                     BD.decode (BD.map (\n -> n * 2) BD.unsignedInt8) empty
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 1 }))
             ]
         , describe "map2"
             [ test "combines two values" <|
@@ -245,11 +245,11 @@ mappingTests =
             , test "fails on first decoder" <|
                 \_ ->
                     BD.decode (BD.map2 Tuple.pair BD.unsignedInt8 BD.unsignedInt8) empty
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 1 }))
             , test "fails on second decoder" <|
                 \_ ->
                     BD.decode (BD.map2 Tuple.pair BD.unsignedInt8 BD.unsignedInt8) (fromList [ 1 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 1, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 1, bytes = 1 }))
             , test "works with mixed types" <|
                 \_ ->
                     let
@@ -272,7 +272,7 @@ mappingTests =
             , test "fails on third decoder" <|
                 \_ ->
                     BD.decode (BD.map3 (\a b c -> ( a, b, c )) BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8) (fromList [ 10, 20 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 2, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 2, bytes = 1 }))
             ]
         , describe "map4"
             [ test "combines four values" <|
@@ -294,7 +294,7 @@ mappingTests =
                     BD.decode
                         (BD.map5 (\a b c d e -> [ a, b, c, d, e ]) BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8 BD.unsignedInt8)
                         (fromList [ 1, 2, 3 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 3, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 3, bytes = 1 }))
             ]
         ]
 
@@ -353,7 +353,7 @@ chainingTests =
                             |> BD.andThen (\_ -> BD.fail "nope")
                 in
                 BD.decode decoder (fromList [ 42 ])
-                    |> Expect.equal (Err (CustomError 1 "nope"))
+                    |> Expect.equal (Err (Custom { at = 1 } "nope"))
         , test "propagates first decoder error" <|
             \_ ->
                 let
@@ -362,7 +362,7 @@ chainingTests =
                             |> BD.andThen (\_ -> BD.succeed "ok")
                 in
                 BD.decode decoder empty
-                    |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 1 }))
+                    |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 1 }))
         , test "chained andThen with multiple reads" <|
             \_ ->
                 let
@@ -411,7 +411,7 @@ pipelineTests =
                                 |> BD.keep BD.unsignedInt8
                     in
                     BD.decode decoder (fromList [ 1, 2 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 2, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 2, bytes = 1 }))
             ]
         , describe "ignore"
             [ test "skips decoder result" <|
@@ -448,7 +448,7 @@ pipelineTests =
             , test "fails if not enough bytes to skip" <|
                 \_ ->
                     BD.decode (BD.skip 10 BD.unsignedInt8) (fromList [ 1 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 10 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 10 }))
             ]
         ]
 
@@ -499,17 +499,17 @@ branchingTests =
                 BD.decode decoder empty
                     |> Expect.equal
                         (Err
-                            (OneOfErrors 0
-                                [ CustomError 0 "err1"
-                                , CustomError 0 "err2"
-                                , CustomError 0 "err3"
+                            (BadOneOf { at = 0 }
+                                [ Custom { at = 0 } "err1"
+                                , Custom { at = 0 } "err2"
+                                , Custom { at = 0 } "err3"
                                 ]
                             )
                         )
         , test "empty oneOf fails" <|
             \_ ->
                 BD.decode (BD.oneOf []) empty
-                    |> Expect.equal (Err (OneOfErrors 0 []))
+                    |> Expect.equal (Err (BadOneOf { at = 0 } []))
         , test "oneOf resets offset for each alternative" <|
             \_ ->
                 let
@@ -578,7 +578,7 @@ loopingTests =
                             BD.unsignedInt8
                                 |> BD.andThen
                                     (\count ->
-                                        BD.loop ( count, [] )
+                                        BD.loop
                                             (\( remaining, acc ) ->
                                                 if remaining <= 0 then
                                                     BD.succeed (BD.Done (List.reverse acc))
@@ -586,6 +586,7 @@ loopingTests =
                                                 else
                                                     BD.map (\v -> BD.Loop ( remaining - 1, v :: acc )) BD.unsignedInt8
                                             )
+                                            ( count, [] )
                                     )
                     in
                     BD.decode decoder (fromList [ 3, 10, 20, 30 ])
@@ -593,7 +594,7 @@ loopingTests =
             , test "zero iterations" <|
                 \_ ->
                     BD.decode
-                        (BD.loop 0
+                        (BD.loop
                             (\n ->
                                 if n <= 0 then
                                     BD.succeed (BD.Done "done")
@@ -601,6 +602,7 @@ loopingTests =
                                 else
                                     BD.map (\_ -> BD.Loop (n - 1)) BD.unsignedInt8
                             )
+                            0
                         )
                         empty
                         |> Expect.equal (Ok "done")
@@ -608,7 +610,7 @@ loopingTests =
                 \_ ->
                     let
                         decoder =
-                            BD.loop ( 5, [] )
+                            BD.loop
                                 (\( remaining, acc ) ->
                                     if remaining <= 0 then
                                         BD.succeed (BD.Done (List.reverse acc))
@@ -616,9 +618,10 @@ loopingTests =
                                     else
                                         BD.map (\v -> BD.Loop ( remaining - 1, v :: acc )) BD.unsignedInt8
                                 )
+                                ( 5, [] )
                     in
                     BD.decode decoder (fromList [ 1, 2 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 2, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 2, bytes = 1 }))
             ]
         , describe "repeat"
             [ test "decodes N items" <|
@@ -636,7 +639,7 @@ loopingTests =
             , test "repeat fails when input too short" <|
                 \_ ->
                     BD.decode (BD.repeat BD.unsignedInt8 5) (fromList [ 1, 2 ])
-                        |> Expect.equal (Err (OutOfBounds { offset = 2, bytesNeeded = 1 }))
+                        |> Expect.equal (Err (OutOfBounds { at = 2, bytes = 1 }))
             , test "repeat with compound decoder" <|
                 \_ ->
                     let
@@ -660,40 +663,11 @@ loopingTests =
 errorTests : Test
 errorTests =
     describe "Errors"
-        [ describe "mapError"
-            [ test "transforms custom error" <|
-                \_ ->
-                    BD.decode (BD.mapError String.length (BD.fail "hi")) empty
-                        |> Expect.equal (Err (CustomError 0 2))
-            , test "leaves OutOfBounds unchanged" <|
-                \_ ->
-                    BD.decode (BD.mapError String.length BD.unsignedInt8) empty
-                        |> Expect.equal (Err (OutOfBounds { offset = 0, bytesNeeded = 1 }))
-            , test "preserves success" <|
-                \_ ->
-                    BD.decode (BD.mapError String.length BD.unsignedInt8) (fromList [ 42 ])
-                        |> Expect.equal (Ok 42)
-            , test "transforms nested errors in OneOfErrors" <|
-                \_ ->
-                    BD.decode
-                        (BD.mapError String.toUpper
-                            (BD.oneOf [ BD.fail "a", BD.fail "b" ])
-                        )
-                        empty
-                        |> Expect.equal
-                            (Err
-                                (OneOfErrors 0
-                                    [ CustomError 0 "A"
-                                    , CustomError 0 "B"
-                                    ]
-                                )
-                            )
-            ]
-        , describe "inContext"
+        [ describe "inContext"
             [ test "wraps error with label" <|
                 \_ ->
                     BD.decode (BD.inContext "header" (BD.fail "bad")) empty
-                        |> Expect.equal (Err (InContext "header" (CustomError 0 "bad")))
+                        |> Expect.equal (Err (InContext { label = "header", start = 0 } (Custom { at = 0 } "bad")))
             , test "preserves success" <|
                 \_ ->
                     BD.decode (BD.inContext "header" BD.unsignedInt8) (fromList [ 1 ])
@@ -707,9 +681,9 @@ errorTests =
                         empty
                         |> Expect.equal
                             (Err
-                                (InContext "outer"
-                                    (InContext "inner"
-                                        (CustomError 0 "deep")
+                                (InContext { label = "outer", start = 0 }
+                                    (InContext { label = "inner", start = 0 }
+                                        (Custom { at = 0 } "deep")
                                     )
                                 )
                             )
@@ -726,40 +700,12 @@ errorTests =
                     BD.decode decoder (fromList [ 1 ])
                         |> Expect.equal
                             (Err
-                                (InContext "record"
-                                    (InContext "field2"
-                                        (OutOfBounds { offset = 1, bytesNeeded = 1 })
+                                (InContext { label = "record", start = 0 }
+                                    (InContext { label = "field2", start = 1 }
+                                        (OutOfBounds { at = 1, bytes = 1 })
                                     )
                                 )
                             )
-            ]
-        , describe "offsetAt"
-            [ test "returns current offset" <|
-                \_ ->
-                    BD.decode BD.offsetAt empty
-                        |> Expect.equal (Ok 0)
-            , test "returns offset after some reads" <|
-                \_ ->
-                    let
-                        decoder =
-                            BD.unsignedInt8
-                                |> BD.andThen (\_ -> BD.offsetAt)
-                    in
-                    BD.decode decoder (fromList [ 42 ])
-                        |> Expect.equal (Ok 1)
-            , test "returns offset after multiple reads" <|
-                \_ ->
-                    let
-                        decoder =
-                            BD.unsignedInt8
-                                |> BD.andThen
-                                    (\_ ->
-                                        BD.unsignedInt16 BE
-                                            |> BD.andThen (\_ -> BD.offsetAt)
-                                    )
-                    in
-                    BD.decode decoder (fromList [ 1, 2, 3 ])
-                        |> Expect.equal (Ok 3)
             ]
         ]
 
@@ -797,17 +743,6 @@ edgeCaseTests =
                 in
                 BD.decode decoder (fromList [ 1, 2, 3, 4, 5, 6 ])
                     |> Expect.equal (Ok [ 1, 2, 3, 4, 5, 6 ])
-        , test "map2 with one Slow operand falls back to slow" <|
-            \_ ->
-                let
-                    slowDecoder =
-                        BD.unsignedInt8 |> BD.andThen BD.succeed
-
-                    decoder =
-                        BD.map2 Tuple.pair BD.unsignedInt8 slowDecoder
-                in
-                BD.decode decoder (fromList [ 10, 20 ])
-                    |> Expect.equal (Ok ( 10, 20 ))
         , test "andThen into applicative sub-decoder" <|
             \_ ->
                 let
@@ -822,8 +757,6 @@ edgeCaseTests =
         , test "oneOf with applicative alternatives" <|
             \_ ->
                 let
-                    -- All alternatives are Fast (pure applicative)
-                    -- but oneOf itself is Slow — verifies the fast-path-on-slice optimization
                     decoder =
                         BD.oneOf
                             [ BD.map2 (\a b -> ( a, b )) BD.unsignedInt8 BD.unsignedInt8
@@ -874,9 +807,9 @@ edgeCaseTests =
                 BD.decode decoder (fromList [ 1 ])
                     |> Expect.equal
                         (Err
-                            (OneOfErrors 0
-                                [ OutOfBounds { offset = 0, bytesNeeded = 4 }
-                                , OutOfBounds { offset = 0, bytesNeeded = 2 }
+                            (BadOneOf { at = 0 }
+                                [ OutOfBounds { at = 0, bytes = 4 }
+                                , OutOfBounds { at = 0, bytes = 2 }
                                 ]
                             )
                         )
@@ -894,28 +827,12 @@ edgeCaseTests =
                 BD.decode decoder empty
                     |> Expect.equal
                         (Err
-                            (InContext "value"
-                                (OneOfErrors 0
-                                    [ CustomError 0 "not a"
-                                    , CustomError 0 "not b"
+                            (InContext { label = "value", start = 0 }
+                                (BadOneOf { at = 0 }
+                                    [ Custom { at = 0 } "not a"
+                                    , Custom { at = 0 } "not b"
                                     ]
                                 )
-                            )
-                        )
-        , test "mapError + inContext compose" <|
-            \_ ->
-                let
-                    decoder =
-                        BD.mapError String.toUpper
-                            (BD.inContext "section"
-                                (BD.fail "bad")
-                            )
-                in
-                BD.decode decoder empty
-                    |> Expect.equal
-                        (Err
-                            (InContext "section"
-                                (CustomError 0 "BAD")
                             )
                         )
         ]

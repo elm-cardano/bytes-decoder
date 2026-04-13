@@ -489,9 +489,9 @@ bd_keep5 () =
         |> Result.toMaybe
 
 
-bdLoopFloat64 : Int -> BD.Decoder e (List Float)
+bdLoopFloat64 : Int -> BD.Decoder c e (List Float)
 bdLoopFloat64 n =
-    BD.loop ( n, [] )
+    BD.loop
         (\( remaining, acc ) ->
             if remaining <= 0 then
                 BD.succeed (BD.Done (List.reverse acc))
@@ -499,6 +499,7 @@ bdLoopFloat64 n =
             else
                 BD.map (\v -> BD.Loop ( remaining - 1, v :: acc )) (BD.float64 BE)
         )
+        ( n, [] )
 
 
 bd_repeat_10 : () -> Maybe (List Float)
@@ -562,7 +563,7 @@ type OneOfResult
     | Tag2 Int Int Int Int
 
 
-bdOneOfDecoder : BD.Decoder String OneOfResult
+bdOneOfDecoder : BD.Decoder c String OneOfResult
 bdOneOfDecoder =
     BD.oneOf
         [ BD.unsignedInt8 |> BD.andThen (\t -> if t == 0 then BD.map Tag0 BD.unsignedInt8 else BD.fail "not 0")
@@ -590,7 +591,7 @@ bd_packet () =
     BD.decode bdPacketDecoder packetData |> Result.toMaybe
 
 
-bdPacketDecoder : BD.Decoder e Packet
+bdPacketDecoder : BD.Decoder c e Packet
 bdPacketDecoder =
     BD.succeed Packet
         |> BD.keep (BD.unsignedInt32 BE)
@@ -610,7 +611,7 @@ bd_message () =
     BD.decode bdMessageDecoder messageData |> Result.toMaybe
 
 
-bdMessageDecoder : BD.Decoder e Message
+bdMessageDecoder : BD.Decoder c e Message
 bdMessageDecoder =
     BD.map3 (\magic version priority -> ( magic, version, priority ))
         (BD.unsignedInt32 BE)
@@ -621,7 +622,7 @@ bdMessageDecoder =
                 BD.unsignedInt8
                     |> BD.andThen
                         (\fieldCount ->
-                            BD.loop ( fieldCount, [] )
+                            BD.loop
                                 (\( remaining, acc ) ->
                                     if remaining <= 0 then
                                         BD.succeed (BD.Done (List.reverse acc))
@@ -631,6 +632,7 @@ bdMessageDecoder =
                                             (BD.signedInt32 BE)
                                             (BD.float64 BE)
                                 )
+                                ( fieldCount, [] )
                                 |> BD.andThen
                                     (\fields ->
                                         BD.map4
@@ -649,7 +651,7 @@ bdMessageDecoder =
 bd_tagged50 : () -> Maybe (List OneOfResult)
 bd_tagged50 () =
     BD.decode
-        (BD.loop ( 50, [] )
+        (BD.loop
             (\( remaining, acc ) ->
                 if remaining <= 0 then
                     BD.succeed (BD.Done (List.reverse acc))
@@ -657,6 +659,7 @@ bd_tagged50 () =
                 else
                     BD.map (\v -> BD.Loop ( remaining - 1, v :: acc )) bdOneOfDecoder
             )
+            ( 50, [] )
         )
         tagged50Data
         |> Result.toMaybe
