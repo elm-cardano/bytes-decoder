@@ -25,6 +25,19 @@ module BenchZw exposing
     , p2_packet
     , p2_message
     , p2_tagged50
+    , p3_map2
+    , p3_keep5
+    , p3_map5
+    , p3_repeat_100
+    , p3_loop_10
+    , p3_loop_100
+    , p3_loop_1000
+    , p3_andThen_5
+    , p3_oneOf_first
+    , p3_oneOf_last
+    , p3_packet
+    , p3_message
+    , p3_tagged50
     )
 
 {-| Head-to-head benchmarks: zwilias/elm-bytes-parser (ZW) vs Bytes.Parser2 (P2).
@@ -49,6 +62,7 @@ import Bytes.Decode as D
 import Bytes.Encode as E
 import Bytes.Parser as ZW
 import Bytes.Parser2 as P2
+import Bytes.Parser3 as P3
 
 
 
@@ -599,6 +613,198 @@ p2_tagged50 () =
 
                 else
                     P2.map (\v -> P2.Loop ( remaining - 1, v :: acc )) p2OneOfDecoder
+            )
+            ( 50, [] )
+        )
+        tagged50Data
+        |> Result.toMaybe
+
+
+
+-- ============================================================================
+-- Bytes.Parser3 (P3) — inlined fromDecoder
+-- ============================================================================
+
+
+p3_map2 : () -> Maybe ( Int, Int )
+p3_map2 () =
+    P3.run
+        (P3.map2 Tuple.pair P3.unsignedInt8 P3.unsignedInt8)
+        data2
+        |> Result.toMaybe
+
+
+p3_keep5 : () -> Maybe Record5
+p3_keep5 () =
+    P3.run
+        (P3.succeed Record5
+            |> P3.keep P3.unsignedInt8
+            |> P3.keep P3.unsignedInt8
+            |> P3.keep P3.unsignedInt8
+            |> P3.keep P3.unsignedInt8
+            |> P3.keep P3.unsignedInt8
+        )
+        data5
+        |> Result.toMaybe
+
+
+p3_map5 : () -> Maybe Record5
+p3_map5 () =
+    P3.run
+        (P3.map5 Record5 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8)
+        data5
+        |> Result.toMaybe
+
+
+p3_repeat_100 : () -> Maybe (List Float)
+p3_repeat_100 () =
+    P3.run (P3.repeat (P3.float64 BE) 100) floats100 |> Result.toMaybe
+
+
+p3LoopFloat64 : Int -> P3.Parser c e (List Float)
+p3LoopFloat64 n =
+    P3.loop
+        (\( remaining, acc ) ->
+            if remaining <= 0 then
+                P3.succeed (P3.Done (List.reverse acc))
+
+            else
+                P3.map (\v -> P3.Loop ( remaining - 1, v :: acc )) (P3.float64 BE)
+        )
+        ( n, [] )
+
+
+p3_loop_10 : () -> Maybe (List Float)
+p3_loop_10 () =
+    P3.run (p3LoopFloat64 10) floats10 |> Result.toMaybe
+
+
+p3_loop_100 : () -> Maybe (List Float)
+p3_loop_100 () =
+    P3.run (p3LoopFloat64 100) floats100 |> Result.toMaybe
+
+
+p3_loop_1000 : () -> Maybe (List Float)
+p3_loop_1000 () =
+    P3.run (p3LoopFloat64 1000) floats1000 |> Result.toMaybe
+
+
+p3_andThen_5 : () -> Maybe Record5
+p3_andThen_5 () =
+    P3.run
+        (P3.unsignedInt8
+            |> P3.andThen
+                (\a ->
+                    P3.unsignedInt8
+                        |> P3.andThen
+                            (\b ->
+                                P3.unsignedInt8
+                                    |> P3.andThen
+                                        (\c ->
+                                            P3.unsignedInt8
+                                                |> P3.andThen
+                                                    (\d ->
+                                                        P3.map (\e -> Record5 a b c d e) P3.unsignedInt8
+                                                    )
+                                        )
+                            )
+                )
+        )
+        data5
+        |> Result.toMaybe
+
+
+p3OneOfDecoder : P3.Parser c String OneOfResult
+p3OneOfDecoder =
+    P3.oneOf
+        [ P3.unsignedInt8 |> P3.andThen (\t -> if t == 0 then P3.map Tag0 P3.unsignedInt8 else P3.fail "not 0")
+        , P3.unsignedInt8 |> P3.andThen (\t -> if t == 1 then P3.map2 Tag1 P3.unsignedInt8 P3.unsignedInt8 else P3.fail "not 1")
+        , P3.unsignedInt8 |> P3.andThen (\t -> if t == 2 then P3.map4 Tag2 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8 P3.unsignedInt8 else P3.fail "not 2")
+        ]
+
+
+p3_oneOf_first : () -> Maybe OneOfResult
+p3_oneOf_first () =
+    P3.run p3OneOfDecoder oneOfFirstData |> Result.toMaybe
+
+
+p3_oneOf_last : () -> Maybe OneOfResult
+p3_oneOf_last () =
+    P3.run p3OneOfDecoder oneOfLastData |> Result.toMaybe
+
+
+p3_packet : () -> Maybe Packet
+p3_packet () =
+    P3.run p3PacketDecoder packetData |> Result.toMaybe
+
+
+p3PacketDecoder : P3.Parser c e Packet
+p3PacketDecoder =
+    P3.succeed Packet
+        |> P3.keep (P3.unsignedInt32 BE)
+        |> P3.keep (P3.unsignedInt16 BE)
+        |> P3.keep P3.signedInt8
+        |> P3.skip 1
+        |> P3.keep (P3.float32 BE)
+        |> P3.keep (P3.float64 BE)
+        |> P3.keep (P3.bytes 4)
+        |> P3.keep (P3.string 3)
+        |> P3.ignore P3.unsignedInt8
+        |> P3.keep (P3.repeat (P3.unsignedInt16 BE) 10)
+
+
+p3_message : () -> Maybe Message
+p3_message () =
+    P3.run p3MessageDecoder messageData |> Result.toMaybe
+
+
+p3MessageDecoder : P3.Parser c e Message
+p3MessageDecoder =
+    P3.map3 (\magic version priority -> ( magic, version, priority ))
+        (P3.unsignedInt32 BE)
+        (P3.unsignedInt16 BE)
+        P3.signedInt8
+        |> P3.andThen
+            (\( magic, version, priority ) ->
+                P3.unsignedInt8
+                    |> P3.andThen
+                        (\fieldCount ->
+                            P3.loop
+                                (\( remaining, acc ) ->
+                                    if remaining <= 0 then
+                                        P3.succeed (P3.Done (List.reverse acc))
+
+                                    else
+                                        P3.map2 (\k v -> P3.Loop ( remaining - 1, ( k, v ) :: acc ))
+                                            (P3.signedInt32 BE)
+                                            (P3.float64 BE)
+                                )
+                                ( fieldCount, [] )
+                                |> P3.andThen
+                                    (\fields ->
+                                        P3.map4
+                                            (\checksum code tag label ->
+                                                Message magic version priority fields checksum code tag label
+                                            )
+                                            (P3.float32 BE)
+                                            (P3.signedInt16 BE)
+                                            (P3.bytes 4)
+                                            (P3.string 3)
+                                    )
+                        )
+            )
+
+
+p3_tagged50 : () -> Maybe (List OneOfResult)
+p3_tagged50 () =
+    P3.run
+        (P3.loop
+            (\( remaining, acc ) ->
+                if remaining <= 0 then
+                    P3.succeed (P3.Done (List.reverse acc))
+
+                else
+                    P3.map (\v -> P3.Loop ( remaining - 1, v :: acc )) p3OneOfDecoder
             )
             ( 50, [] )
         )
