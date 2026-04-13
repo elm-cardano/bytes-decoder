@@ -10,14 +10,100 @@ module Bytes.Parser3 exposing
     , andThen, oneOf, repeat, Step(..), loop
     )
 
-{-| Dual-path parser: fast path using raw elm/bytes Decoder (no error tracking),
-slow path using P2-style State -> ParseResult (full error tracking).
+{-| Dual-path bytes parser: optimistic fast path with full error reporting.
 
-On `run`:
 
-1.  Try the fast Decoder via `Decode.decode`. If it succeeds, return `Ok value`.
-2.  If the fast path is unavailable or fails, re-parse with the slow path
-    to produce a detailed error.
+# Architecture
+
+Each `Parser` carries two execution strategies:
+
+1.  **Fast path** — a raw `elm/bytes` `Decoder` composed via `Decode.map2`,
+    `Decode.andThen`, `Decode.loop`, etc. When present, `run` executes a single
+    `Decode.decode` call with zero per-step overhead (no `ParseResult` pattern
+    matching, no `State` threading). This matches the performance of hand-written
+    `elm/bytes` decoders.
+
+2.  **Slow path** — a `State -> ParseResult` function identical to the approach
+    in `Bytes.Parser2`. It tracks byte offsets, reports structured errors, and
+    supports backtracking in `oneOf`. This path is only executed when the fast
+    path is unavailable or returns `Nothing` (i.e. an error occurred).
+
+The key insight is that most parsers succeed on well-formed input. By deferring
+error tracking to a re-parse, the happy path pays no cost for error reporting.
+
+
+# Fast-path availability
+
+Not every combinator can be expressed as a raw `Decoder`:
+
+  - **Always fast**: `succeed`, `map`, `map2`–`map5`, `keep`, `ignore`, `skip`,
+    `andThen`, `loop`, `repeat`, and all primitives.
+  - **Always slow**: `fail` (no `Decoder` can produce a value), `oneOf`
+    (requires backtracking which `Decoder` cannot do mid-stream).
+  - **Conditionally fast**: `andThen` and `loop` remain fast as long as the
+    callback returns a parser with a fast path. If a callback branch returns
+    `fail`, that branch uses `Decode.fail` to signal the decoder, which causes
+    `Decode.decode` to return `Nothing` and triggers the slow re-parse.
+
+In practice, `fail` branches inside `andThen` are error-handling code that only
+runs on malformed input — exactly when we want to re-parse with error tracking.
+
+
+# Benchmark results (vs Parser2)
+
+  - Applicative (`map5`, `keep5`, `packet`): **2–5× faster**
+  - Sequential (`andThen_5`, `message`): **40–80% faster**
+  - Loops (`repeat_100`, `loop_1000`): **2–5× faster**
+  - `oneOf` / `tagged50`: **2–9% slower** (fast path absent, minor overhead
+    from the `Maybe` check in `run`)
+
+
+# Running parsers
+
+@docs Parser, run, Error
+
+
+# Static parsers
+
+@docs succeed, fail, inContext
+
+
+# Basic parsers
+
+
+## Integers
+
+@docs unsignedInt8, unsignedInt16, unsignedInt32, signedInt8, signedInt16, signedInt32
+
+
+## Floats
+
+@docs float32, float64
+
+
+## Strings
+
+@docs string
+
+
+## Bytes
+
+@docs bytes
+
+
+# Transforming values
+
+@docs map, map2, map3, map4, map5
+
+
+# Combining parsers
+
+@docs keep, ignore, skip
+
+
+# Fancy parsers
+
+@docs andThen, oneOf, repeat, Step, loop
 
 -}
 
@@ -25,6 +111,13 @@ import Bytes exposing (Bytes)
 import Bytes.Decode as Decode exposing (Decoder)
 
 
+{-| A parser which tracks a certain type of context, a certain type of error and
+produces a certain type of value.
+
+Internally, it carries an optional raw `Decoder` (fast path) and a
+`State -> ParseResult` function (slow path for error reporting).
+
+-}
 type Parser context error value
     = Parser (Maybe (Decoder value)) (State -> ParseResult context error value)
 
@@ -34,6 +127,12 @@ type ParseResult context error value
     | Bad (Error context error)
 
 
+{-| Describes errors that arise while parsing.
+
+Custom errors happen through [`fail`](#fail), context tracking happens through
+[`inContext`](#inContext).
+
+-}
 type Error context error
     = InContext { label : context, start : Int } (Error context error)
     | OutOfBounds { at : Int, bytes : Int }
@@ -47,6 +146,12 @@ type alias State =
     }
 
 
+{-| Run the given parser on the provided bytes.
+
+First tries the fast path (a single `Decode.decode` call). If the fast path is
+unavailable or fails, re-parses with the slow path to produce a detailed error.
+
+-}
 run :
     Parser context error value
     -> Bytes
@@ -79,16 +184,29 @@ runSlow slow input =
 -- STATIC
 
 
+{-| Always succeed with the given value, consuming no input.
+-}
 succeed : value -> Parser context error value
 succeed val =
     Parser (Just (Decode.succeed val)) (Good val)
 
 
+{-| Always fail with the given error.
+
+This parser has no fast path — using it (even in a branch of `andThen`) will
+cause `run` to fall back to the slow path for error reporting.
+
+-}
 fail : error -> Parser context error value
 fail e =
     Parser Nothing (\state -> Bad (Custom { at = state.offset } e))
 
 
+{-| Add context to errors that may occur during parsing.
+
+The fast path is preserved (context only matters on the error path).
+
+-}
 inContext :
     context
     -> Parser context error value
@@ -115,6 +233,8 @@ inContext label (Parser maybeDec slow) =
 -- COMBINATORS
 
 
+{-| Transform the value a parser produces.
+-}
 map :
     (a -> b)
     -> Parser context error a
@@ -132,6 +252,13 @@ map t (Parser maybeDec slow) =
         )
 
 
+{-| Parse one thing, then parse another thing based on the result.
+
+The fast path uses `Decode.andThen`. If the callback returns a parser without
+a fast path (e.g. via `fail`), the fast decoder signals failure via
+`Decode.fail`, causing `run` to fall back to the slow path.
+
+-}
 andThen :
     (a -> Parser context error b)
     -> Parser context error a
@@ -167,6 +294,8 @@ andThen toNext (Parser maybeDecA slowA) =
         )
 
 
+{-| Combine what 2 parsers produce.
+-}
 map2 :
     (x -> y -> z)
     -> Parser context error x
@@ -196,6 +325,8 @@ map2 f (Parser maybeDecX slowX) (Parser maybeDecY slowY) =
         )
 
 
+{-| Combine what 3 parsers produce.
+-}
 map3 :
     (w -> x -> y -> z)
     -> Parser context error w
@@ -231,6 +362,8 @@ map3 f (Parser maybeDecW slowW) (Parser maybeDecX slowX) (Parser maybeDecY slowY
         )
 
 
+{-| Combine what 4 parsers produce.
+-}
 map4 :
     (v -> w -> x -> y -> z)
     -> Parser context error v
@@ -277,6 +410,8 @@ map4 f (Parser maybeDecV slowV) (Parser maybeDecW slowW) (Parser maybeDecX slowX
         )
 
 
+{-| Combine what 5 parsers produce.
+-}
 map5 :
     (u -> v -> w -> x -> y -> z)
     -> Parser context error u
@@ -329,6 +464,16 @@ map5 f (Parser maybeDecU slowU) (Parser maybeDecV slowV) (Parser maybeDecW slowW
         )
 
 
+{-| Keep the value produced by a parser in a pipeline.
+
+    P3.succeed Record5
+        |> P3.keep P3.unsignedInt8
+        |> P3.keep P3.unsignedInt8
+        |> P3.keep P3.unsignedInt8
+        |> P3.keep P3.unsignedInt8
+        |> P3.keep P3.unsignedInt8
+
+-}
 keep :
     Parser context error a
     -> Parser context error (a -> b)
@@ -357,6 +502,11 @@ keep (Parser maybeDecVal slowVal) (Parser maybeDecFun slowFun) =
         )
 
 
+{-| Ignore the value produced by a parser in a pipeline.
+
+The ignored parser must still succeed for the pipeline to succeed.
+
+-}
 ignore :
     Parser context error ignore
     -> Parser context error keep
@@ -385,11 +535,19 @@ ignore (Parser maybeDecSkip slowSkip) (Parser maybeDecKeep slowKeep) =
         )
 
 
+{-| Skip a number of bytes in a pipeline.
+-}
 skip : Int -> Parser context error value -> Parser context error value
 skip nBytes =
     ignore (bytes nBytes)
 
 
+{-| Try a list of parsers and succeed with the first one that succeeds.
+
+This parser has no fast path — it always uses the slow path with backtracking.
+For tag-based dispatch, prefer `andThen` which preserves the fast path.
+
+-}
 oneOf : List (Parser context error value) -> Parser context error value
 oneOf options =
     Parser Nothing (oneOfHelp options [])
@@ -414,11 +572,21 @@ oneOfHelp options errors state =
                     oneOfHelp xs (e :: errors) state
 
 
+{-| Represent the next step of a loop: either continue with updated state,
+or finish with a final value.
+-}
 type Step state a
     = Loop state
     | Done a
 
 
+{-| Loop a parser until it declares it is done.
+
+The fast path uses `Decode.loop` (a tight `while` loop in the JS kernel).
+If any iteration's callback returns a parser without a fast path, the fast
+decoder signals failure via `Decode.fail` and `run` falls back to the slow path.
+
+-}
 loop :
     (state -> Parser context error (Step state a))
     -> state
@@ -475,6 +643,11 @@ loopHelp loopState toNext state =
             Bad e
 
 
+{-| Repeat a parser a given number of times, collecting results into a list.
+
+The fast path uses `Decode.loop` (a tight `while` loop in the JS kernel).
+
+-}
 repeat : Parser context error value -> Int -> Parser context error (List value)
 repeat (Parser maybeDec slow) nTimes =
     Parser
@@ -517,56 +690,83 @@ repeatHelp slow remaining acc state =
 -- PRIMITIVES
 
 
+{-| Parse one byte into an integer from 0 to 255.
+-}
 unsignedInt8 : Parser context error Int
 unsignedInt8 =
     fromDecoder Decode.unsignedInt8 1
 
 
+{-| Parse one byte into an integer from -128 to 127.
+-}
 signedInt8 : Parser context error Int
 signedInt8 =
     fromDecoder Decode.signedInt8 1
 
 
+{-| Parse two bytes into an integer from 0 to 65535.
+-}
 unsignedInt16 : Bytes.Endianness -> Parser context error Int
 unsignedInt16 bo =
     fromDecoder (Decode.unsignedInt16 bo) 2
 
 
+{-| Parse two bytes into an integer from -32768 to 32767.
+-}
 signedInt16 : Bytes.Endianness -> Parser context error Int
 signedInt16 bo =
     fromDecoder (Decode.signedInt16 bo) 2
 
 
+{-| Parse four bytes into an integer from 0 to 4294967295.
+-}
 unsignedInt32 : Bytes.Endianness -> Parser context error Int
 unsignedInt32 bo =
     fromDecoder (Decode.unsignedInt32 bo) 4
 
 
+{-| Parse four bytes into an integer from -2147483648 to 2147483647.
+-}
 signedInt32 : Bytes.Endianness -> Parser context error Int
 signedInt32 bo =
     fromDecoder (Decode.signedInt32 bo) 4
 
 
+{-| Parse 4 bytes into a Float.
+-}
 float32 : Bytes.Endianness -> Parser context error Float
 float32 bo =
     fromDecoder (Decode.float32 bo) 4
 
 
+{-| Parse 8 bytes into a Float.
+-}
 float64 : Bytes.Endianness -> Parser context error Float
 float64 bo =
     fromDecoder (Decode.float64 bo) 8
 
 
+{-| Parse `count` bytes as `Bytes`.
+-}
 bytes : Int -> Parser context error Bytes
 bytes count =
     fromDecoder (Decode.bytes count) count
 
 
+{-| Parse `byteCount` bytes representing UTF-8 characters into a String.
+-}
 string : Int -> Parser context error String
 string byteCount =
     fromDecoder (Decode.string byteCount) byteCount
 
 
+{-| Build a parser from a raw `Decoder` and its byte length.
+
+The fast path stores the decoder directly (it will be composed into a larger
+decoder by combinators). The slow path uses the P2 strategy: skip to the
+current offset via `Decode.bytes`, then decode.
+
+-}
 fromDecoder : Decoder v -> Int -> Parser context error v
 fromDecoder dec byteLength =
     Parser
