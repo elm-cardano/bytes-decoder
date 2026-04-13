@@ -59,8 +59,8 @@ Realistic 2 — dynamic message (57 B, andThen + loop)
 
 The `andThen`/`loop` scenario shows more overhead because every callback
 re-enters the fast path via `Decode.decode`, but it is still significantly
-faster than a pure state-passing approach. See [`bench/`](bench/README.md)
-for the full suite.
+faster than a pure state-passing approach. See the `bench/` directory for the
+full suite.
 
 ## How it works
 
@@ -135,8 +135,8 @@ cd bench
 elm-bench -f Bench.raw_map5 -f Bench.bd_map5 -f Bench.zw_map5 -f Bench.br_map5 "()"
 ```
 
-See [`bench/README.md`](bench/README.md) for the full benchmark suite and
-[`examples/README.md`](examples/README.md) for error reporting examples.
+See `bench/` for the full benchmark suite and `examples/` for error reporting
+examples.
 
 ## License
 
