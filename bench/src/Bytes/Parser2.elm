@@ -506,8 +506,20 @@ map2 :
     -> Parser context error x
     -> Parser context error y
     -> Parser context error z
-map2 f parserX parserY =
-    parserX |> andThen (\x -> parserY |> andThen (\y -> succeed (f x y)))
+map2 f (Parser fx) (Parser fy) =
+    Parser <|
+        \state ->
+            case fx state of
+                Good x s1 ->
+                    case fy s1 of
+                        Good y s2 ->
+                            Good (f x y) s2
+
+                        Bad e ->
+                            Bad e
+
+                Bad e ->
+                    Bad e
 
 
 {-| -}
@@ -517,9 +529,25 @@ map3 :
     -> Parser context error x
     -> Parser context error y
     -> Parser context error z
-map3 f parserW parserX parserY =
-    map2 f parserW parserX
-        |> keep parserY
+map3 f (Parser fw) (Parser fx) (Parser fy) =
+    Parser <|
+        \state ->
+            case fw state of
+                Good w s1 ->
+                    case fx s1 of
+                        Good x s2 ->
+                            case fy s2 of
+                                Good y s3 ->
+                                    Good (f w x y) s3
+
+                                Bad e ->
+                                    Bad e
+
+                        Bad e ->
+                            Bad e
+
+                Bad e ->
+                    Bad e
 
 
 {-| -}
@@ -530,9 +558,30 @@ map4 :
     -> Parser context error x
     -> Parser context error y
     -> Parser context error z
-map4 f parserV parserW parserX parserY =
-    map3 f parserV parserW parserX
-        |> keep parserY
+map4 f (Parser fv) (Parser fw) (Parser fx) (Parser fy) =
+    Parser <|
+        \state ->
+            case fv state of
+                Good v s1 ->
+                    case fw s1 of
+                        Good w s2 ->
+                            case fx s2 of
+                                Good x s3 ->
+                                    case fy s3 of
+                                        Good y s4 ->
+                                            Good (f v w x y) s4
+
+                                        Bad e ->
+                                            Bad e
+
+                                Bad e ->
+                                    Bad e
+
+                        Bad e ->
+                            Bad e
+
+                Bad e ->
+                    Bad e
 
 
 {-| -}
@@ -544,9 +593,35 @@ map5 :
     -> Parser context error x
     -> Parser context error y
     -> Parser context error z
-map5 f parserU parserV parserW parserX parserY =
-    map4 f parserU parserV parserW parserX
-        |> keep parserY
+map5 f (Parser fu) (Parser fv) (Parser fw) (Parser fx) (Parser fy) =
+    Parser <|
+        \state ->
+            case fu state of
+                Good u s1 ->
+                    case fv s1 of
+                        Good v s2 ->
+                            case fw s2 of
+                                Good w s3 ->
+                                    case fx s3 of
+                                        Good x s4 ->
+                                            case fy s4 of
+                                                Good y s5 ->
+                                                    Good (f u v w x y) s5
+
+                                                Bad e ->
+                                                    Bad e
+
+                                        Bad e ->
+                                            Bad e
+
+                                Bad e ->
+                                    Bad e
+
+                        Bad e ->
+                            Bad e
+
+                Bad e ->
+                    Bad e
 
 
 {-| Keep the value produced by a parser in a pipeline.
@@ -579,8 +654,20 @@ keep :
     Parser context error a
     -> Parser context error (a -> b)
     -> Parser context error b
-keep val fun =
-    map2 (<|) fun val
+keep (Parser fval) (Parser ffun) =
+    Parser <|
+        \state ->
+            case ffun state of
+                Good g s1 ->
+                    case fval s1 of
+                        Good a s2 ->
+                            Good (g a) s2
+
+                        Bad e ->
+                            Bad e
+
+                Bad e ->
+                    Bad e
 
 
 {-| Ignore the value produced by a parser.
@@ -630,8 +717,20 @@ ignore :
     Parser context error ignore
     -> Parser context error keep
     -> Parser context error keep
-ignore skipper keeper =
-    map2 always keeper skipper
+ignore (Parser fskip) (Parser fkeep) =
+    Parser <|
+        \state ->
+            case fkeep state of
+                Good k s1 ->
+                    case fskip s1 of
+                        Good _ s2 ->
+                            Good k s2
+
+                        Bad e ->
+                            Bad e
+
+                Bad e ->
+                    Bad e
 
 
 {-| Skip a number of bytes in a pipeline.

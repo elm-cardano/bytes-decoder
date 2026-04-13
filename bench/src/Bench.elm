@@ -31,6 +31,16 @@ module Bench exposing
     , zw_packet
     , zw_message
     , zw_tagged50
+    , p2_map5
+    , p2_loop_10
+    , p2_loop_100
+    , p2_loop_1000
+    , p2_andThen_5
+    , p2_oneOf_first
+    , p2_oneOf_last
+    , p2_packet
+    , p2_message
+    , p2_tagged50
     , br_map5
     , br_loop_10
     , br_loop_100
@@ -43,55 +53,56 @@ module Bench exposing
     , br_tagged50
     )
 
-{-| Benchmarks comparing four Elm bytes decoding approaches.
+{-| Benchmarks comparing five Elm bytes decoding approaches.
 
 Prefixes:
 
   - `raw_` — elm/bytes (baseline)
   - `bd_` — elm-cardano/bytes-decoder (this package)
-  - `zw_` — zwilias/elm-bytes-parser
+  - `zw_` — zwilias/elm-bytes-parser (original)
+  - `p2_` — Bytes.Parser2 (optimized copy of zw)
   - `br_` — mpizenberg/elm-bytes-decoder (Branchable)
 
 
 ## Sequential (applicative) — map5, 5 fields
 
-    elm-bench -f Bench.raw_map5 -f Bench.bd_map5 -f Bench.zw_map5 -f Bench.br_map5 "()"
+    elm-bench -f Bench.raw_map5 -f Bench.bd_map5 -f Bench.zw_map5 -f Bench.p2_map5 -f Bench.br_map5 "()"
 
 
 ## Loop — 100 float64s
 
-    elm-bench -f Bench.raw_loop_100 -f Bench.bd_repeat_100 -f Bench.bd_loop_100 -f Bench.zw_loop_100 -f Bench.br_loop_100 "()"
+    elm-bench -f Bench.raw_loop_100 -f Bench.bd_repeat_100 -f Bench.bd_loop_100 -f Bench.zw_loop_100 -f Bench.p2_loop_100 -f Bench.br_loop_100 "()"
 
 
 ## Loop — 1000 float64s
 
-    elm-bench -f Bench.raw_loop_1000 -f Bench.bd_repeat_1000 -f Bench.bd_loop_1000 -f Bench.zw_loop_1000 -f Bench.br_loop_1000 "()"
+    elm-bench -f Bench.raw_loop_1000 -f Bench.bd_repeat_1000 -f Bench.bd_loop_1000 -f Bench.zw_loop_1000 -f Bench.p2_loop_1000 -f Bench.br_loop_1000 "()"
 
 
 ## andThen — 5 fields via chained andThen
 
-    elm-bench -f Bench.raw_andThen_5 -f Bench.bd_andThen_5 -f Bench.zw_andThen_5 -f Bench.br_andThen_5 "()"
+    elm-bench -f Bench.raw_andThen_5 -f Bench.bd_andThen_5 -f Bench.zw_andThen_5 -f Bench.p2_andThen_5 -f Bench.br_andThen_5 "()"
 
 
 ## oneOf — first and last alternative
 
-    elm-bench -f Bench.bd_oneOf_first -f Bench.zw_oneOf_first -f Bench.br_oneOf_first "()"
-    elm-bench -f Bench.bd_oneOf_last -f Bench.zw_oneOf_last -f Bench.br_oneOf_last "()"
+    elm-bench -f Bench.bd_oneOf_first -f Bench.zw_oneOf_first -f Bench.p2_oneOf_first -f Bench.br_oneOf_first "()"
+    elm-bench -f Bench.bd_oneOf_last -f Bench.zw_oneOf_last -f Bench.p2_oneOf_last -f Bench.br_oneOf_last "()"
 
 
 ## Realistic 1 — all-fast packet (48 B, pure applicative)
 
-    elm-bench -f Bench.raw_packet -f Bench.bd_packet -f Bench.zw_packet -f Bench.br_packet "()"
+    elm-bench -f Bench.raw_packet -f Bench.bd_packet -f Bench.zw_packet -f Bench.p2_packet -f Bench.br_packet "()"
 
 
 ## Realistic 2 — dynamic message (57 B, andThen + loop)
 
-    elm-bench -f Bench.raw_message -f Bench.bd_message -f Bench.zw_message -f Bench.br_message "()"
+    elm-bench -f Bench.raw_message -f Bench.bd_message -f Bench.zw_message -f Bench.p2_message -f Bench.br_message "()"
 
 
 ## Realistic 3 — 50 tagged records with oneOf (175 B)
 
-    elm-bench -f Bench.raw_tagged50 -f Bench.bd_tagged50 -f Bench.zw_tagged50 -f Bench.br_tagged50 "()"
+    elm-bench -f Bench.raw_tagged50 -f Bench.bd_tagged50 -f Bench.zw_tagged50 -f Bench.p2_tagged50 -f Bench.br_tagged50 "()"
 
 -}
 
@@ -101,6 +112,7 @@ import Bytes.Decode.Branchable as BR
 import Bytes.Decoder as BD
 import Bytes.Encode as E
 import Bytes.Parser as ZW
+import Bytes.Parser2 as P2
 
 
 
@@ -812,6 +824,175 @@ zw_tagged50 () =
 
                 else
                     ZW.map (\v -> ZW.Loop ( remaining - 1, v :: acc )) zwOneOfDecoder
+            )
+            ( 50, [] )
+        )
+        tagged50Data
+        |> Result.toMaybe
+
+
+
+-- ============================================================================
+-- Bytes.Parser2 (P2) — optimized copy of ZW
+-- ============================================================================
+
+
+p2_map5 : () -> Maybe Record5
+p2_map5 () =
+    P2.run
+        (P2.map5 Record5 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8)
+        data5
+        |> Result.toMaybe
+
+
+p2LoopFloat64 : Int -> P2.Parser c e (List Float)
+p2LoopFloat64 n =
+    P2.loop
+        (\( remaining, acc ) ->
+            if remaining <= 0 then
+                P2.succeed (P2.Done (List.reverse acc))
+
+            else
+                P2.map (\v -> P2.Loop ( remaining - 1, v :: acc )) (P2.float64 BE)
+        )
+        ( n, [] )
+
+
+p2_loop_10 : () -> Maybe (List Float)
+p2_loop_10 () =
+    P2.run (p2LoopFloat64 10) floats10 |> Result.toMaybe
+
+
+p2_loop_100 : () -> Maybe (List Float)
+p2_loop_100 () =
+    P2.run (p2LoopFloat64 100) floats100 |> Result.toMaybe
+
+
+p2_loop_1000 : () -> Maybe (List Float)
+p2_loop_1000 () =
+    P2.run (p2LoopFloat64 1000) floats1000 |> Result.toMaybe
+
+
+p2_andThen_5 : () -> Maybe Record5
+p2_andThen_5 () =
+    P2.run
+        (P2.unsignedInt8
+            |> P2.andThen
+                (\a ->
+                    P2.unsignedInt8
+                        |> P2.andThen
+                            (\b ->
+                                P2.unsignedInt8
+                                    |> P2.andThen
+                                        (\c ->
+                                            P2.unsignedInt8
+                                                |> P2.andThen
+                                                    (\d ->
+                                                        P2.map (\e -> Record5 a b c d e) P2.unsignedInt8
+                                                    )
+                                        )
+                            )
+                )
+        )
+        data5
+        |> Result.toMaybe
+
+
+p2OneOfDecoder : P2.Parser c String OneOfResult
+p2OneOfDecoder =
+    P2.oneOf
+        [ P2.unsignedInt8 |> P2.andThen (\t -> if t == 0 then P2.map Tag0 P2.unsignedInt8 else P2.fail "not 0")
+        , P2.unsignedInt8 |> P2.andThen (\t -> if t == 1 then P2.map2 Tag1 P2.unsignedInt8 P2.unsignedInt8 else P2.fail "not 1")
+        , P2.unsignedInt8 |> P2.andThen (\t -> if t == 2 then P2.map4 Tag2 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 else P2.fail "not 2")
+        ]
+
+
+p2_oneOf_first : () -> Maybe OneOfResult
+p2_oneOf_first () =
+    P2.run p2OneOfDecoder oneOfFirstData |> Result.toMaybe
+
+
+p2_oneOf_last : () -> Maybe OneOfResult
+p2_oneOf_last () =
+    P2.run p2OneOfDecoder oneOfLastData |> Result.toMaybe
+
+
+
+-- Realistic benchmarks
+
+
+p2_packet : () -> Maybe Packet
+p2_packet () =
+    P2.run p2PacketDecoder packetData |> Result.toMaybe
+
+
+p2PacketDecoder : P2.Parser c e Packet
+p2PacketDecoder =
+    P2.succeed Packet
+        |> P2.keep (P2.unsignedInt32 BE)
+        |> P2.keep (P2.unsignedInt16 BE)
+        |> P2.keep P2.signedInt8
+        |> P2.skip 1
+        |> P2.keep (P2.float32 BE)
+        |> P2.keep (P2.float64 BE)
+        |> P2.keep (P2.bytes 4)
+        |> P2.keep (P2.string 3)
+        |> P2.ignore P2.unsignedInt8
+        |> P2.keep (P2.repeat (P2.unsignedInt16 BE) 10)
+
+
+p2_message : () -> Maybe Message
+p2_message () =
+    P2.run p2MessageDecoder messageData |> Result.toMaybe
+
+
+p2MessageDecoder : P2.Parser c e Message
+p2MessageDecoder =
+    P2.map3 (\magic version priority -> ( magic, version, priority ))
+        (P2.unsignedInt32 BE)
+        (P2.unsignedInt16 BE)
+        P2.signedInt8
+        |> P2.andThen
+            (\( magic, version, priority ) ->
+                P2.unsignedInt8
+                    |> P2.andThen
+                        (\fieldCount ->
+                            P2.loop
+                                (\( remaining, acc ) ->
+                                    if remaining <= 0 then
+                                        P2.succeed (P2.Done (List.reverse acc))
+
+                                    else
+                                        P2.map2 (\k v -> P2.Loop ( remaining - 1, ( k, v ) :: acc ))
+                                            (P2.signedInt32 BE)
+                                            (P2.float64 BE)
+                                )
+                                ( fieldCount, [] )
+                                |> P2.andThen
+                                    (\fields ->
+                                        P2.map4
+                                            (\checksum code tag label ->
+                                                Message magic version priority fields checksum code tag label
+                                            )
+                                            (P2.float32 BE)
+                                            (P2.signedInt16 BE)
+                                            (P2.bytes 4)
+                                            (P2.string 3)
+                                    )
+                        )
+            )
+
+
+p2_tagged50 : () -> Maybe (List OneOfResult)
+p2_tagged50 () =
+    P2.run
+        (P2.loop
+            (\( remaining, acc ) ->
+                if remaining <= 0 then
+                    P2.succeed (P2.Done (List.reverse acc))
+
+                else
+                    P2.map (\v -> P2.Loop ( remaining - 1, v :: acc )) p2OneOfDecoder
             )
             ( 50, [] )
         )
