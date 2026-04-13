@@ -1,6 +1,6 @@
-# Error Comparison
+# Error Reporting Examples
 
-Side-by-side comparison of error messages produced by four Elm bytes decoding libraries when decoding fails.
+Demonstrates how `Bytes.Decoder` reports errors when decoding fails, covering the four error types: `OutOfBounds`, `Custom`, `BadOneOf`, and `InContext`.
 
 ## View it
 
@@ -9,4 +9,4 @@ cd examples
 elm reactor
 ```
 
-Then open http://localhost:8000/src/ErrorComparison.elm
+Then open http://localhost:8000/src/ErrorReporting.elm
