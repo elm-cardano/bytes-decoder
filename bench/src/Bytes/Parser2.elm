@@ -872,20 +872,27 @@ times to repeat something through a parser.
 
 -}
 repeat : Parser context error value -> Int -> Parser context error (List value)
-repeat p nTimes =
-    loop (repeatHelp p) ( nTimes, [] )
+repeat (Parser f) nTimes =
+    Parser (repeatHelp f nTimes [])
 
 
 repeatHelp :
-    Parser context error value
-    -> ( Int, List value )
-    -> Parser context error (Step ( Int, List value ) (List value))
-repeatHelp p ( cnt, acc ) =
-    if cnt <= 0 then
-        succeed (Done (List.reverse acc))
+    (State -> ParseResult context error value)
+    -> Int
+    -> List value
+    -> State
+    -> ParseResult context error (List value)
+repeatHelp f remaining acc state =
+    if remaining <= 0 then
+        Good (List.reverse acc) state
 
     else
-        map (\v -> Loop ( cnt - 1, v :: acc )) p
+        case f state of
+            Good v newState ->
+                repeatHelp f (remaining - 1) (v :: acc) newState
+
+            Bad e ->
+                Bad e
 
 
 

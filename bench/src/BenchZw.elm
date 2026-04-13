@@ -2,6 +2,7 @@ module BenchZw exposing
     ( zw_map2
     , zw_keep5
     , zw_map5
+    , zw_repeat_100
     , zw_loop_10
     , zw_loop_100
     , zw_loop_1000
@@ -14,6 +15,7 @@ module BenchZw exposing
     , p2_map2
     , p2_keep5
     , p2_map5
+    , p2_repeat_100
     , p2_loop_10
     , p2_loop_100
     , p2_loop_1000
@@ -30,6 +32,7 @@ module BenchZw exposing
     elm-bench -f BenchZw.zw_map2 -f BenchZw.p2_map2 "()"
     elm-bench -f BenchZw.zw_keep5 -f BenchZw.p2_keep5 "()"
     elm-bench -f BenchZw.zw_map5 -f BenchZw.p2_map5 "()"
+    elm-bench -f BenchZw.zw_repeat_100 -f BenchZw.p2_repeat_100 "()"
     elm-bench -f BenchZw.zw_loop_100 -f BenchZw.p2_loop_100 "()"
     elm-bench -f BenchZw.zw_loop_1000 -f BenchZw.p2_loop_1000 "()"
     elm-bench -f BenchZw.zw_andThen_5 -f BenchZw.p2_andThen_5 "()"
@@ -255,6 +258,11 @@ zw_map5 () =
         |> Result.toMaybe
 
 
+zw_repeat_100 : () -> Maybe (List Float)
+zw_repeat_100 () =
+    ZW.run (ZW.repeat (ZW.float64 BE) 100) floats100 |> Result.toMaybe
+
+
 zwLoopFloat64 : Int -> ZW.Parser c e (List Float)
 zwLoopFloat64 n =
     ZW.loop
@@ -440,6 +448,11 @@ p2_map5 () =
         (P2.map5 Record5 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8 P2.unsignedInt8)
         data5
         |> Result.toMaybe
+
+
+p2_repeat_100 : () -> Maybe (List Float)
+p2_repeat_100 () =
+    P2.run (P2.repeat (P2.float64 BE) 100) floats100 |> Result.toMaybe
 
 
 p2LoopFloat64 : Int -> P2.Parser c e (List Float)
