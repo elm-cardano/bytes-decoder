@@ -8,6 +8,7 @@ module Bytes.Decoder exposing
     , map, map2, map3, map4, map5
     , keep, ignore, skip
     , andThen, oneOf, repeat, Step(..), loop
+    , Position, position, startOfInput, randomAccess
     )
 
 {-| Fast bytes decoder with error reporting and `oneOf` branching.
@@ -94,6 +95,11 @@ runs on malformed input — exactly when we want to re-decode with error trackin
 # Chaining
 
 @docs andThen, oneOf, repeat, Step, loop
+
+
+# Random access
+
+@docs Position, position, startOfInput, randomAccess
 
 -}
 
@@ -702,6 +708,122 @@ repeatHelp slow remaining acc state =
 
             Bad e ->
                 Bad e
+
+
+
+-- RANDOM ACCESS
+
+
+{-| An opaque position in the input, obtained via [`position`](#position).
+-}
+type Position
+    = Position Int
+
+
+{-| Produce the current byte offset in the input.
+
+This decoder has no fast path — using it will cause `decode` to fall back to
+the slow path.
+
+    import Bytes.Decoder as BD
+
+    BD.decode BD.position (fromList [ 1, 2, 3 ])
+    --> Ok BD.startOfInput
+
+    BD.decode
+        (BD.unsignedInt8
+            |> BD.andThen (\_ -> BD.position)
+        )
+        (fromList [ 1, 2, 3 ])
+        |> Result.map (\\p -> p == BD.startOfInput)
+    --> Ok False
+
+-}
+position : Decoder context error Position
+position =
+    Decoder Nothing (\state -> Good (Position state.offset) state)
+
+
+{-| The position at the very start of the input (offset 0).
+
+Useful as the `relativeTo` argument in [`randomAccess`](#randomAccess).
+
+-}
+startOfInput : Position
+startOfInput =
+    Position 0
+
+
+{-| Read data at an arbitrary offset, then resume where you left off.
+
+This decoder has no fast path.
+
+As an example, consider data laid out as:
+
+  - A byte giving the length of a string
+  - A byte giving the absolute offset to the string
+  - Another byte we also need
+
+<!-- -->
+
+    import Bytes exposing (Bytes)
+    import Bytes.Decoder as BD exposing (Decoder)
+    import Bytes.Encode as E
+
+    input : Bytes
+    input =
+        [ E.unsignedInt8 5
+        , E.unsignedInt8 15
+        , E.unsignedInt8 6
+        , E.string (String.repeat 12 "\u{0000}")
+        , E.string "hello"
+        ]
+            |> E.sequence
+            |> E.encode
+
+    stringAtOffset : Decoder c e String
+    stringAtOffset =
+        BD.map2 Tuple.pair BD.unsignedInt8 BD.unsignedInt8
+            |> BD.andThen
+                (\( len, offset ) ->
+                    BD.randomAccess
+                        { offset = offset, relativeTo = BD.startOfInput }
+                        (BD.string len)
+                )
+
+    BD.decode stringAtOffset input
+    --> Ok "hello"
+
+Parsing continues at the sequential position after `randomAccess` returns:
+
+    final : Decoder c e { string : String, number : Int }
+    final =
+        BD.succeed (\s n -> { string = s, number = n })
+            |> BD.keep stringAtOffset
+            |> BD.keep BD.unsignedInt8
+
+    BD.decode final input
+    --> Ok { string = "hello", number = 6 }
+
+-}
+randomAccess :
+    { offset : Int, relativeTo : Position }
+    -> Decoder context error value
+    -> Decoder context error value
+randomAccess config (Decoder _ slow) =
+    Decoder Nothing
+        (\state ->
+            let
+                (Position start) =
+                    config.relativeTo
+            in
+            case slow { offset = start + config.offset, input = state.input } of
+                Good v _ ->
+                    Good v state
+
+                Bad e ->
+                    Bad e
+        )
 
 
 

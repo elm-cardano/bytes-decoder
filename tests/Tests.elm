@@ -54,6 +54,7 @@ suite =
         , pipelineTests
         , branchingTests
         , loopingTests
+        , randomAccessTests
         , errorTests
         , edgeCaseTests
         ]
@@ -674,6 +675,139 @@ loopingTests =
                 \_ ->
                     BD.decode (BD.repeat (BD.float64 BE) 3) (floatBytes [ 1.0, 2.0, 3.0 ])
                         |> Expect.equal (Ok [ 1.0, 2.0, 3.0 ])
+            ]
+        ]
+
+
+
+-- RANDOM ACCESS
+
+
+randomAccessTests : Test
+randomAccessTests =
+    describe "Random access"
+        [ describe "position"
+            [ test "returns startOfInput at offset 0" <|
+                \_ ->
+                    BD.decode BD.position (fromList [ 1, 2, 3 ])
+                        |> Expect.equal (Ok BD.startOfInput)
+            , test "returns offset after reading" <|
+                \_ ->
+                    BD.decode
+                        (BD.unsignedInt8
+                            |> BD.andThen (\_ -> BD.position)
+                        )
+                        (fromList [ 1, 2, 3 ])
+                        |> Result.map (\p -> p /= BD.startOfInput)
+                        |> Expect.equal (Ok True)
+            , test "consumes no bytes" <|
+                \_ ->
+                    BD.decode
+                        (BD.map2 Tuple.pair BD.position BD.unsignedInt8)
+                        (fromList [ 42 ])
+                        |> Result.map Tuple.second
+                        |> Expect.equal (Ok 42)
+            ]
+        , describe "randomAccess"
+            [ test "reads at absolute offset" <|
+                \_ ->
+                    let
+                        -- [0, 0, 0, 42] — read the byte at offset 3
+                        decoder =
+                            BD.randomAccess
+                                { offset = 3, relativeTo = BD.startOfInput }
+                                BD.unsignedInt8
+                    in
+                    BD.decode decoder (fromList [ 0, 0, 0, 42 ])
+                        |> Expect.equal (Ok 42)
+            , test "resumes at original position" <|
+                \_ ->
+                    let
+                        -- Read u8 at offset 0, jump to offset 3 for another u8, then read u8 at offset 1
+                        decoder =
+                            BD.succeed (\a b c -> ( a, b, c ))
+                                |> BD.keep BD.unsignedInt8
+                                |> BD.keep
+                                    (BD.randomAccess
+                                        { offset = 3, relativeTo = BD.startOfInput }
+                                        BD.unsignedInt8
+                                    )
+                                |> BD.keep BD.unsignedInt8
+                    in
+                    BD.decode decoder (fromList [ 1, 2, 0, 42 ])
+                        |> Expect.equal (Ok ( 1, 42, 2 ))
+            , test "with position-relative offset" <|
+                \_ ->
+                    let
+                        -- Byte 0: length (5), Byte 1: relative offset (2), Byte 2: number (99),
+                        -- Bytes 3-7: "hello"
+                        input =
+                            E.encode
+                                (E.sequence
+                                    [ E.unsignedInt8 5
+                                    , E.unsignedInt8 2
+                                    , E.unsignedInt8 99
+                                    , E.string "hello"
+                                    ]
+                                )
+
+                        decoder =
+                            BD.succeed Tuple.pair
+                                |> BD.keep BD.unsignedInt8
+                                |> BD.keep BD.position
+                                |> BD.andThen
+                                    (\( len, marker ) ->
+                                        BD.unsignedInt8
+                                            |> BD.andThen
+                                                (\relOffset ->
+                                                    BD.randomAccess
+                                                        { offset = relOffset, relativeTo = marker }
+                                                        (BD.string len)
+                                                )
+                                    )
+                    in
+                    BD.decode decoder input
+                        |> Expect.equal (Ok "hello")
+            , test "resumes after randomAccess in pipeline" <|
+                \_ ->
+                    let
+                        input =
+                            E.encode
+                                (E.sequence
+                                    [ E.unsignedInt8 5
+                                    , E.unsignedInt8 15
+                                    , E.unsignedInt8 6
+                                    , E.string (String.repeat 12 "\u{0000}")
+                                    , E.string "hello"
+                                    ]
+                                )
+
+                        stringAtOffset =
+                            BD.map2 Tuple.pair BD.unsignedInt8 BD.unsignedInt8
+                                |> BD.andThen
+                                    (\( len, offset ) ->
+                                        BD.randomAccess
+                                            { offset = offset, relativeTo = BD.startOfInput }
+                                            (BD.string len)
+                                    )
+
+                        decoder =
+                            BD.succeed (\s n -> { string = s, number = n })
+                                |> BD.keep stringAtOffset
+                                |> BD.keep BD.unsignedInt8
+                    in
+                    BD.decode decoder input
+                        |> Expect.equal (Ok { string = "hello", number = 6 })
+            , test "error in randomAccess propagates" <|
+                \_ ->
+                    let
+                        decoder =
+                            BD.randomAccess
+                                { offset = 100, relativeTo = BD.startOfInput }
+                                BD.unsignedInt8
+                    in
+                    BD.decode decoder (fromList [ 1, 2, 3 ])
+                        |> Expect.equal (Err (OutOfBounds { at = 100, bytes = 1 }))
             ]
         ]
 
