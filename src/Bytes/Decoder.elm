@@ -543,8 +543,8 @@ ignore (Decoder maybeDecSkip slowSkip) (Decoder maybeDecKeep slowKeep) =
 {-| Skip `n` bytes, then continue with the given decoder.
 -}
 skip : Int -> Decoder context error value -> Decoder context error value
-skip nBytes decoder =
-    map2 (\_ v -> v) (bytes nBytes) decoder
+skip nBytes =
+    ignore (bytes nBytes)
 
 
 

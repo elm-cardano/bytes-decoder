@@ -437,18 +437,40 @@ pipelineTests =
                         |> Expect.equal (Ok ( 1, 3 ))
             ]
         , describe "skip"
-            [ test "skips N bytes" <|
+            [ test "skip in pipeline skips bytes between fields" <|
                 \_ ->
                     let
                         decoder =
-                            BD.skip 3 BD.unsignedInt8
+                            BD.succeed Tuple.pair
+                                |> BD.keep BD.unsignedInt8
+                                |> BD.skip 2
+                                |> BD.keep BD.unsignedInt8
                     in
-                    BD.decode decoder (fromList [ 0, 0, 0, 42 ])
-                        |> Expect.equal (Ok 42)
+                    BD.decode decoder (fromList [ 1, 0, 0, 42 ])
+                        |> Expect.equal (Ok ( 1, 42 ))
+            , test "skip in pipeline with multiple skips" <|
+                \_ ->
+                    let
+                        decoder =
+                            BD.succeed (\a b c -> ( a, b, c ))
+                                |> BD.keep BD.unsignedInt8
+                                |> BD.skip 1
+                                |> BD.keep BD.unsignedInt8
+                                |> BD.skip 1
+                                |> BD.keep BD.unsignedInt8
+                    in
+                    BD.decode decoder (fromList [ 1, 99, 2, 99, 3 ])
+                        |> Expect.equal (Ok ( 1, 2, 3 ))
             , test "fails if not enough bytes to skip" <|
                 \_ ->
-                    BD.decode (BD.skip 10 BD.unsignedInt8) (fromList [ 1 ])
-                        |> Expect.equal (Err (OutOfBounds { at = 0, bytes = 10 }))
+                    let
+                        decoder =
+                            BD.succeed identity
+                                |> BD.keep BD.unsignedInt8
+                                |> BD.skip 10
+                    in
+                    BD.decode decoder (fromList [ 1 ])
+                        |> Expect.equal (Err (OutOfBounds { at = 1, bytes = 10 }))
             ]
         ]
 
@@ -782,9 +804,15 @@ edgeCaseTests =
                 in
                 BD.decode decoder (fromList [ 3, 10, 20, 30 ])
                     |> Expect.equal (Ok [ 10, 20, 30 ])
-        , test "skip 0 is no-op" <|
+        , test "skip 0 is no-op in pipeline" <|
             \_ ->
-                BD.decode (BD.skip 0 BD.unsignedInt8) (fromList [ 42 ])
+                let
+                    decoder =
+                        BD.succeed identity
+                            |> BD.keep BD.unsignedInt8
+                            |> BD.skip 0
+                in
+                BD.decode decoder (fromList [ 42 ])
                     |> Expect.equal (Ok 42)
         , test "deeply nested succeed" <|
             \_ ->
