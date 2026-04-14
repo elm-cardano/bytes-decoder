@@ -564,6 +564,14 @@ For tag-based dispatch, prefer `andThen` which preserves the fast path.
 
 Collects all errors on failure for diagnostic purposes.
 
+**Caution:** `oneOf` backtracks by byte offset, not by meaning. If two branches
+consume the same number of bytes but interpret them differently (e.g.
+`unsignedInt32` vs `float32`), the first branch that successfully reads those
+bytes wins — even if the value makes no sense for your domain. In general,
+raw byte sequences are untagged, so `oneOf` cannot distinguish between
+alternatives that happen to have the same byte layout. Prefer `andThen` with
+an explicit tag byte whenever possible.
+
 -}
 oneOf : List (Decoder context error value) -> Decoder context error value
 oneOf options =

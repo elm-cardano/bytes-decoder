@@ -3,7 +3,7 @@
     "name": "elm-cardano/bytes-decoder",
     "summary": "Fast bytes decoder with error reporting and oneOf branching",
     "license": "BSD-3-Clause",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "exposed-modules": [
         "Bytes.Decoder"
     ],
