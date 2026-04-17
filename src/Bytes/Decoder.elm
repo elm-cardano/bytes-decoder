@@ -2,7 +2,7 @@ module Bytes.Decoder exposing
     ( Decoder, decode, Error(..)
     , succeed, fail, inContext
     , unsignedInt8, unsignedInt16, unsignedInt32, signedInt8, signedInt16, signedInt32
-    , float32, float64
+    , float16, float32, float64
     , string
     , bytes
     , map, map2, map3, map4, map5
@@ -69,7 +69,7 @@ runs on malformed input — exactly when we want to re-decode with error trackin
 
 ## Floats
 
-@docs float32, float64
+@docs float16, float32, float64
 
 
 ## Strings
@@ -105,6 +105,7 @@ runs on malformed input — exactly when we want to re-decode with error trackin
 
 import Bytes exposing (Bytes)
 import Bytes.Decode as Decode
+import Bytes.Floating.Decode
 
 
 
@@ -878,6 +879,13 @@ unsignedInt32 bo =
 signedInt32 : Bytes.Endianness -> Decoder context error Int
 signedInt32 bo =
     fromDecoder (Decode.signedInt32 bo) 4
+
+
+{-| Decode two bytes as a 16-bit float.
+-}
+float16 : Bytes.Endianness -> Decoder context error Float
+float16 bo =
+    fromDecoder (Bytes.Floating.Decode.float16 bo) 2
 
 
 {-| Decode four bytes as a 32-bit float.
