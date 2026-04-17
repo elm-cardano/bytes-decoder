@@ -9,6 +9,7 @@ module Bytes.Decoder exposing
     , keep, ignore, skip
     , andThen, oneOf, repeat, Step(..), loop
     , Position, position, startOfInput, randomAccess
+    , fromDecoderUnsafe
     )
 
 {-| Fast bytes decoder with error reporting and `oneOf` branching.
@@ -100,6 +101,11 @@ runs on malformed input — exactly when we want to re-decode with error trackin
 # Random access
 
 @docs Position, position, startOfInput, randomAccess
+
+
+# Advanced
+
+@docs fromDecoderUnsafe
 
 -}
 
@@ -914,6 +920,52 @@ bytes count =
 string : Int -> Decoder context error String
 string byteCount =
     fromInnerDecoder (Decode.string byteCount) byteCount
+
+
+
+-- ADVANCED
+
+
+{-| Wrap a raw `Bytes.Decode.Decoder` into a `Decoder` with error reporting.
+
+This is an escape hatch for advanced users who already have a working
+`Bytes.Decode.Decoder` and want to use it within this library's decoder
+pipeline. You must supply:
+
+  - `error` — the error to report if the inner decoder fails
+  - `byteLength` — the **exact** number of bytes the inner decoder consumes on
+    success
+  - the raw `Bytes.Decode.Decoder` to wrap
+
+**The recommended approach** is to rewrite your decoder using the functions
+provided by this module — they cover all the functionality of the original
+`Bytes.Decode` module while providing error reporting and `oneOf` branching.
+
+**This function is unsafe** because the caller is responsible for providing the
+correct byte width. If the byte length is wrong, the offset tracking in the slow
+path will be incorrect, leading to corrupt subsequent decoding. This also means
+it **must not** be used for variable-length decoders (e.g. decoders that read a
+length prefix and then consume that many bytes) — only for fixed-width decoders
+where the byte count is known statically.
+
+-}
+fromDecoderUnsafe : error -> Int -> Decode.Decoder value -> Decoder context error value
+fromDecoderUnsafe error byteLength dec =
+    Decoder
+        (Just dec)
+        (\state ->
+            let
+                combined : Decode.Decoder value
+                combined =
+                    Decode.map2 (\_ v -> v) (Decode.bytes state.offset) dec
+            in
+            case Decode.decode combined state.input of
+                Just res ->
+                    Good res { offset = state.offset + byteLength, input = state.input }
+
+                Nothing ->
+                    Bad (Custom { at = state.offset } error)
+        )
 
 
 
