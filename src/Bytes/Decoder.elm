@@ -843,85 +843,85 @@ randomAccess config (Decoder _ slow) =
 -}
 unsignedInt8 : Decoder context error Int
 unsignedInt8 =
-    fromDecoder Decode.unsignedInt8 1
+    fromInnerDecoder Decode.unsignedInt8 1
 
 
 {-| Decode one byte as a signed integer from -128 to 127.
 -}
 signedInt8 : Decoder context error Int
 signedInt8 =
-    fromDecoder Decode.signedInt8 1
+    fromInnerDecoder Decode.signedInt8 1
 
 
 {-| Decode two bytes as an unsigned integer from 0 to 65535.
 -}
 unsignedInt16 : Bytes.Endianness -> Decoder context error Int
 unsignedInt16 bo =
-    fromDecoder (Decode.unsignedInt16 bo) 2
+    fromInnerDecoder (Decode.unsignedInt16 bo) 2
 
 
 {-| Decode two bytes as a signed integer from -32768 to 32767.
 -}
 signedInt16 : Bytes.Endianness -> Decoder context error Int
 signedInt16 bo =
-    fromDecoder (Decode.signedInt16 bo) 2
+    fromInnerDecoder (Decode.signedInt16 bo) 2
 
 
 {-| Decode four bytes as an unsigned integer from 0 to 4294967295.
 -}
 unsignedInt32 : Bytes.Endianness -> Decoder context error Int
 unsignedInt32 bo =
-    fromDecoder (Decode.unsignedInt32 bo) 4
+    fromInnerDecoder (Decode.unsignedInt32 bo) 4
 
 
 {-| Decode four bytes as a signed integer from -2147483648 to 2147483647.
 -}
 signedInt32 : Bytes.Endianness -> Decoder context error Int
 signedInt32 bo =
-    fromDecoder (Decode.signedInt32 bo) 4
+    fromInnerDecoder (Decode.signedInt32 bo) 4
 
 
 {-| Decode two bytes as a 16-bit float.
 -}
 float16 : Bytes.Endianness -> Decoder context error Float
 float16 bo =
-    fromDecoder (Bytes.Floating.Decode.float16 bo) 2
+    fromInnerDecoder (Bytes.Floating.Decode.float16 bo) 2
 
 
 {-| Decode four bytes as a 32-bit float.
 -}
 float32 : Bytes.Endianness -> Decoder context error Float
 float32 bo =
-    fromDecoder (Decode.float32 bo) 4
+    fromInnerDecoder (Decode.float32 bo) 4
 
 
 {-| Decode eight bytes as a 64-bit float.
 -}
 float64 : Bytes.Endianness -> Decoder context error Float
 float64 bo =
-    fromDecoder (Decode.float64 bo) 8
+    fromInnerDecoder (Decode.float64 bo) 8
 
 
 {-| Decode exactly `n` bytes.
 -}
 bytes : Int -> Decoder context error Bytes
 bytes count =
-    fromDecoder (Decode.bytes count) count
+    fromInnerDecoder (Decode.bytes count) count
 
 
 {-| Decode exactly `n` bytes as a UTF-8 string.
 -}
 string : Int -> Decoder context error String
 string byteCount =
-    fromDecoder (Decode.string byteCount) byteCount
+    fromInnerDecoder (Decode.string byteCount) byteCount
 
 
 
 -- INTERNAL
 
 
-fromDecoder : Decode.Decoder v -> Int -> Decoder context error v
-fromDecoder dec byteLength =
+fromInnerDecoder : Decode.Decoder v -> Int -> Decoder context error v
+fromInnerDecoder dec byteLength =
     Decoder
         (Just dec)
         (\state ->
