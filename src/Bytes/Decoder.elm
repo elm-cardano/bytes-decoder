@@ -6,7 +6,7 @@ module Bytes.Decoder exposing
     , string
     , bytes
     , map, map2, map3, map4, map5
-    , keep, ignore, skip
+    , keep, ignore, skip, skipBytes
     , andThen, oneOf, repeat, Step(..), loop
     , Position, position, startOfInput, randomAccess
     , fromDecoderUnsafe
@@ -90,7 +90,7 @@ runs on malformed input — exactly when we want to re-decode with error trackin
 
 # Pipeline
 
-@docs keep, ignore, skip
+@docs keep, ignore, skip, skipBytes
 
 
 # Chaining
@@ -560,6 +560,17 @@ skip nBytes =
     ignore (bytes nBytes)
 
 
+{-| Skip exactly `count` bytes, producing `()`.
+
+Unlike [`skip`](#skip) which is a pipeline combinator that takes a decoder
+to continue with, `skipBytes` is a standalone decoder.
+
+-}
+skipBytes : Int -> Decoder context error ()
+skipBytes count =
+    fromInnerDecoder (skipBytesInner count) count
+
+
 
 -- BRANCHING
 
@@ -970,6 +981,11 @@ fromDecoderUnsafe error byteLength dec =
 
 
 -- INTERNAL
+
+
+skipBytesInner : Int -> Decode.Decoder ()
+skipBytesInner count =
+    Decode.map (\_ -> ()) (Decode.bytes count)
 
 
 fromInnerDecoder : Decode.Decoder v -> Int -> Decoder context error v
