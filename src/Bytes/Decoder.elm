@@ -4,9 +4,9 @@ module Bytes.Decoder exposing
     , unsignedInt8, unsignedInt16, unsignedInt32, signedInt8, signedInt16, signedInt32
     , float16, float32, float64
     , string
-    , bytes
+    , bytes, skipBytes
     , map, map2, map3, map4, map5
-    , keep, ignore, skip, skipBytes
+    , keep, ignore, skip
     , andThen, oneOf, repeat, Step(..), loop
     , Position, position, startOfInput, randomAccess
     , fromDecoderUnsafe
@@ -80,7 +80,7 @@ runs on malformed input — exactly when we want to re-decode with error trackin
 
 ## Raw Bytes
 
-@docs bytes
+@docs bytes, skipBytes
 
 
 # Mapping
@@ -90,7 +90,7 @@ runs on malformed input — exactly when we want to re-decode with error trackin
 
 # Pipeline
 
-@docs keep, ignore, skip, skipBytes
+@docs keep, ignore, skip
 
 
 # Chaining
@@ -557,18 +557,7 @@ ignore (Decoder maybeDecSkip slowSkip) (Decoder maybeDecKeep slowKeep) =
 -}
 skip : Int -> Decoder context error value -> Decoder context error value
 skip nBytes =
-    ignore (bytes nBytes)
-
-
-{-| Skip exactly `count` bytes, producing `()`.
-
-Unlike [`skip`](#skip) which is a pipeline combinator that takes a decoder
-to continue with, `skipBytes` is a standalone decoder.
-
--}
-skipBytes : Int -> Decoder context error ()
-skipBytes count =
-    fromInnerDecoder (skipBytesInner count) count
+    ignore (skipBytes nBytes)
 
 
 
@@ -926,6 +915,17 @@ bytes count =
     fromInnerDecoder (Decode.bytes count) count
 
 
+{-| Skip exactly `count` bytes, producing `()`.
+
+Unlike [`skip`](#skip) which is a pipeline combinator that takes a decoder
+to continue with, `skipBytes` is a standalone decoder.
+
+-}
+skipBytes : Int -> Decoder context error ()
+skipBytes count =
+    fromInnerDecoder (skipBytesInner count) count
+
+
 {-| Decode exactly `n` bytes as a UTF-8 string.
 -}
 string : Int -> Decoder context error String
@@ -985,7 +985,36 @@ fromDecoderUnsafe error byteLength dec =
 
 skipBytesInner : Int -> Decode.Decoder ()
 skipBytesInner count =
-    Decode.map (\_ -> ()) (Decode.bytes count)
+    case count of
+        0 ->
+            Decode.succeed ()
+
+        1 ->
+            Decode.map (\_ -> ()) Decode.unsignedInt8
+
+        2 ->
+            Decode.map (\_ -> ()) (Decode.unsignedInt16 Bytes.BE)
+
+        3 ->
+            Decode.map2 (\_ _ -> ()) (Decode.unsignedInt16 Bytes.BE) Decode.unsignedInt8
+
+        4 ->
+            Decode.map (\_ -> ()) (Decode.unsignedInt32 Bytes.BE)
+
+        5 ->
+            Decode.map2 (\_ _ -> ()) (Decode.unsignedInt32 Bytes.BE) Decode.unsignedInt8
+
+        6 ->
+            Decode.map2 (\_ _ -> ()) (Decode.unsignedInt32 Bytes.BE) (Decode.unsignedInt16 Bytes.BE)
+
+        7 ->
+            Decode.map3 (\_ _ _ -> ()) (Decode.unsignedInt32 Bytes.BE) (Decode.unsignedInt16 Bytes.BE) Decode.unsignedInt8
+
+        8 ->
+            Decode.map2 (\_ _ -> ()) (Decode.unsignedInt32 Bytes.BE) (Decode.unsignedInt32 Bytes.BE)
+
+        _ ->
+            Decode.map (\_ -> ()) (Decode.bytes count)
 
 
 fromInnerDecoder : Decode.Decoder v -> Int -> Decoder context error v
