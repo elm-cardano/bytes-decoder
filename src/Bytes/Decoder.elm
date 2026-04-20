@@ -48,6 +48,8 @@ Not every combinator can be expressed as a raw `Bytes.Decode.Decoder`:
 
 In practice, `fail` branches inside `andThen` are error-handling code that only
 runs on malformed input — exactly when we want to re-decode with error tracking.
+Beware that if `oneOf` is used, it will turn the whole decoder into the slow path!
+So avoid it as much as possible.
 
 
 # Running
@@ -567,6 +569,7 @@ skip nBytes =
 {-| Try each decoder in order, returning the first success.
 
 This decoder has no fast path — it always uses the slow path with backtracking.
+Beware that the slow path is contaminating, meaning all decoders in the chain also turn to the slow path.
 For tag-based dispatch, prefer `andThen` which preserves the fast path.
 
 Collects all errors on failure for diagnostic purposes.
